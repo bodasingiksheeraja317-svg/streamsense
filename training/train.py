@@ -313,7 +313,6 @@ def train(args):
         factor   = 0.5,         # halve LR on plateau
         patience = 3,           # wait 3 epochs before reducing
         min_lr   = 1e-6,
-        verbose  = True,
     )
 
     # ── Checkpoint dir + CSV ──────────────────────────────────────────────────

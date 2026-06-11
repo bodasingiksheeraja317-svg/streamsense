@@ -11,7 +11,7 @@ Accepts:
     - torch tensor (any length, mono or stereo)
 
 Loads normalization stats from:
-    C:\STREAMSENSE\stats\normalization_stats.json
+    /content/streamsense/stats/normalization_stats.json
 
 Run directly for 8-test self-test:
     python mel_pipeline.py
@@ -25,7 +25,7 @@ import sys
 from pathlib import Path
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-STATS_FILE = Path(r"C:\STREAMSENSE\stats\normalization_stats.json")
+STATS_FILE = Path(r"/content/streamsense/stats/normalization_stats.json")
 
 # ── MPIC v1.0 frozen parameters ───────────────────────────────────────────────
 SAMPLE_RATE   = 16000
