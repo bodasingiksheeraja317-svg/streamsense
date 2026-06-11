@@ -4,5 +4,4 @@ data/raw/
 streamsense-env-win/
 __pycache__/
 *.pyc
-checkpoints/*.pth
 onnx_models/
