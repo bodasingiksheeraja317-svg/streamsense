@@ -1,0 +1,8 @@
+data/raw/
+*.wav
+*.WAV
+streamsense-env-win/
+__pycache__/
+*.pyc
+checkpoints/*.pth
+onnx_models/
