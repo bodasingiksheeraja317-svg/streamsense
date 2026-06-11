@@ -1,0 +1,338 @@
+{
+  "mpic_version": "1.0",
+  "global_mean": -30.785544706009965,
+  "global_std": 22.157099125788548,
+  "n_fft": 512,
+  "hop_length": 160,
+  "n_mels": 64,
+  "center": false,
+  "clip_floor_db": -80.0,
+  "log_eps": 1e-10,
+  "frame_len": 16000,
+  "expected_T": 97,
+  "raw_bytes": 64000,
+  "mel_bytes": 24832,
+  "tolerance_max_abs_error": 0.0001,
+  "vectors": {
+    "0": {
+      "gv_name": "GV_00_yes",
+      "class_idx": 0,
+      "label": "yes",
+      "source_file": "ddedba85_nohash_9.wav",
+      "raw_bin": "GV_00_yes.bin",
+      "mel_bin": "GV_00_yes_mel.bin",
+      "norm_bin": "GV_00_yes_norm.bin",
+      "raw_bytes": 64000,
+      "mel_bytes": 24832,
+      "norm_bytes": 24832,
+      "raw_shape": [
+        16000
+      ],
+      "mel_shape": [
+        64,
+        97
+      ],
+      "norm_shape": [
+        64,
+        97
+      ],
+      "dtype": "float32",
+      "endianness": "little",
+      "layout": "row-major C order",
+      "mel_peak_db": 41.646,
+      "mel_min_db": -68.7522,
+      "norm_mean": 0.831749,
+      "norm_std": 1.108476,
+      "expected_top1_index": null,
+      "size_validated": true
+    },
+    "1": {
+      "gv_name": "GV_01_no",
+      "class_idx": 1,
+      "label": "no",
+      "source_file": "229978fd_nohash_0.wav",
+      "raw_bin": "GV_01_no.bin",
+      "mel_bin": "GV_01_no_mel.bin",
+      "norm_bin": "GV_01_no_norm.bin",
+      "raw_bytes": 64000,
+      "mel_bytes": 24832,
+      "norm_bytes": 24832,
+      "raw_shape": [
+        16000
+      ],
+      "mel_shape": [
+        64,
+        97
+      ],
+      "norm_shape": [
+        64,
+        97
+      ],
+      "dtype": "float32",
+      "endianness": "little",
+      "layout": "row-major C order",
+      "mel_peak_db": 39.0343,
+      "mel_min_db": -53.1259,
+      "norm_mean": 1.150412,
+      "norm_std": 0.920947,
+      "expected_top1_index": null,
+      "size_validated": true
+    },
+    "2": {
+      "gv_name": "GV_02_up",
+      "class_idx": 2,
+      "label": "up",
+      "source_file": "89f3ab7d_nohash_2.wav",
+      "raw_bin": "GV_02_up.bin",
+      "mel_bin": "GV_02_up_mel.bin",
+      "norm_bin": "GV_02_up_norm.bin",
+      "raw_bytes": 64000,
+      "mel_bytes": 24832,
+      "norm_bytes": 24832,
+      "raw_shape": [
+        16000
+      ],
+      "mel_shape": [
+        64,
+        97
+      ],
+      "norm_shape": [
+        64,
+        97
+      ],
+      "dtype": "float32",
+      "endianness": "little",
+      "layout": "row-major C order",
+      "mel_peak_db": 38.9723,
+      "mel_min_db": -78.3372,
+      "norm_mean": -0.006762,
+      "norm_std": 0.873004,
+      "expected_top1_index": null,
+      "size_validated": true
+    },
+    "3": {
+      "gv_name": "GV_03_down",
+      "class_idx": 3,
+      "label": "down",
+      "source_file": "2fee065a_nohash_0.wav",
+      "raw_bin": "GV_03_down.bin",
+      "mel_bin": "GV_03_down_mel.bin",
+      "norm_bin": "GV_03_down_norm.bin",
+      "raw_bytes": 64000,
+      "mel_bytes": 24832,
+      "norm_bytes": 24832,
+      "raw_shape": [
+        16000
+      ],
+      "mel_shape": [
+        64,
+        97
+      ],
+      "norm_shape": [
+        64,
+        97
+      ],
+      "dtype": "float32",
+      "endianness": "little",
+      "layout": "row-major C order",
+      "mel_peak_db": 40.7839,
+      "mel_min_db": -36.991,
+      "norm_mean": 1.266948,
+      "norm_std": 0.593027,
+      "expected_top1_index": null,
+      "size_validated": true
+    },
+    "4": {
+      "gv_name": "GV_04_left",
+      "class_idx": 4,
+      "label": "left",
+      "source_file": "f3d06008_nohash_0.wav",
+      "raw_bin": "GV_04_left.bin",
+      "mel_bin": "GV_04_left_mel.bin",
+      "norm_bin": "GV_04_left_norm.bin",
+      "raw_bytes": 64000,
+      "mel_bytes": 24832,
+      "norm_bytes": 24832,
+      "raw_shape": [
+        16000
+      ],
+      "mel_shape": [
+        64,
+        97
+      ],
+      "norm_shape": [
+        64,
+        97
+      ],
+      "dtype": "float32",
+      "endianness": "little",
+      "layout": "row-major C order",
+      "mel_peak_db": 41.3761,
+      "mel_min_db": -78.1389,
+      "norm_mean": 0.078276,
+      "norm_std": 1.026232,
+      "expected_top1_index": null,
+      "size_validated": true
+    },
+    "5": {
+      "gv_name": "GV_05_right",
+      "class_idx": 5,
+      "label": "right",
+      "source_file": "f5c3de1b_nohash_0.wav",
+      "raw_bin": "GV_05_right.bin",
+      "mel_bin": "GV_05_right_mel.bin",
+      "norm_bin": "GV_05_right_norm.bin",
+      "raw_bytes": 64000,
+      "mel_bytes": 24832,
+      "norm_bytes": 24832,
+      "raw_shape": [
+        16000
+      ],
+      "mel_shape": [
+        64,
+        97
+      ],
+      "norm_shape": [
+        64,
+        97
+      ],
+      "dtype": "float32",
+      "endianness": "little",
+      "layout": "row-major C order",
+      "mel_peak_db": 39.0934,
+      "mel_min_db": -50.0679,
+      "norm_mean": 1.271006,
+      "norm_std": 0.629346,
+      "expected_top1_index": null,
+      "size_validated": true
+    },
+    "6": {
+      "gv_name": "GV_06_on",
+      "class_idx": 6,
+      "label": "on",
+      "source_file": "a42a88ff_nohash_0.wav",
+      "raw_bin": "GV_06_on.bin",
+      "mel_bin": "GV_06_on_mel.bin",
+      "norm_bin": "GV_06_on_norm.bin",
+      "raw_bytes": 64000,
+      "mel_bytes": 24832,
+      "norm_bytes": 24832,
+      "raw_shape": [
+        16000
+      ],
+      "mel_shape": [
+        64,
+        97
+      ],
+      "norm_shape": [
+        64,
+        97
+      ],
+      "dtype": "float32",
+      "endianness": "little",
+      "layout": "row-major C order",
+      "mel_peak_db": 39.6448,
+      "mel_min_db": -51.0607,
+      "norm_mean": 1.206507,
+      "norm_std": 0.884991,
+      "expected_top1_index": null,
+      "size_validated": true
+    },
+    "7": {
+      "gv_name": "GV_07_off",
+      "class_idx": 7,
+      "label": "off",
+      "source_file": "ace82a68_nohash_0.wav",
+      "raw_bin": "GV_07_off.bin",
+      "mel_bin": "GV_07_off_mel.bin",
+      "norm_bin": "GV_07_off_norm.bin",
+      "raw_bytes": 64000,
+      "mel_bytes": 24832,
+      "norm_bytes": 24832,
+      "raw_shape": [
+        16000
+      ],
+      "mel_shape": [
+        64,
+        97
+      ],
+      "norm_shape": [
+        64,
+        97
+      ],
+      "dtype": "float32",
+      "endianness": "little",
+      "layout": "row-major C order",
+      "mel_peak_db": 40.9601,
+      "mel_min_db": -33.8141,
+      "norm_mean": 0.848212,
+      "norm_std": 0.676785,
+      "expected_top1_index": null,
+      "size_validated": true
+    },
+    "8": {
+      "gv_name": "GV_08_stop",
+      "class_idx": 8,
+      "label": "stop",
+      "source_file": "68effe85_nohash_0.wav",
+      "raw_bin": "GV_08_stop.bin",
+      "mel_bin": "GV_08_stop_mel.bin",
+      "norm_bin": "GV_08_stop_norm.bin",
+      "raw_bytes": 64000,
+      "mel_bytes": 24832,
+      "norm_bytes": 24832,
+      "raw_shape": [
+        16000
+      ],
+      "mel_shape": [
+        64,
+        97
+      ],
+      "norm_shape": [
+        64,
+        97
+      ],
+      "dtype": "float32",
+      "endianness": "little",
+      "layout": "row-major C order",
+      "mel_peak_db": 40.5818,
+      "mel_min_db": -41.915,
+      "norm_mean": 1.367446,
+      "norm_std": 0.572776,
+      "expected_top1_index": null,
+      "size_validated": true
+    },
+    "9": {
+      "gv_name": "GV_09_go",
+      "class_idx": 9,
+      "label": "go",
+      "source_file": "2fee065a_nohash_1.wav",
+      "raw_bin": "GV_09_go.bin",
+      "mel_bin": "GV_09_go_mel.bin",
+      "norm_bin": "GV_09_go_norm.bin",
+      "raw_bytes": 64000,
+      "mel_bytes": 24832,
+      "norm_bytes": 24832,
+      "raw_shape": [
+        16000
+      ],
+      "mel_shape": [
+        64,
+        97
+      ],
+      "norm_shape": [
+        64,
+        97
+      ],
+      "dtype": "float32",
+      "endianness": "little",
+      "layout": "row-major C order",
+      "mel_peak_db": 41.3729,
+      "mel_min_db": -33.5064,
+      "norm_mean": 1.234731,
+      "norm_std": 0.558215,
+      "expected_top1_index": null,
+      "size_validated": true
+    }
+  }
+}
