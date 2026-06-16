@@ -1,0 +1,34 @@
+STREAMSENSE — Architecture Comparison: 1D CNN (raw) vs 2D CNN (mel)
+Supports Epic A3.3 (ADR — Architecture Decision Record)
+======================================================================
+
+Metric                         2D StreamSenseNet   1D StreamSenseNet1D
+----------------------------------------------------------------------
+Parameters                               295,786               591,210
+Test accuracy                             95.97%                95.76%
+Test loss                                 0.1273                0.1396
+Input representation           log-mel [1,64,97]raw waveform [1,16000]
+
+Per-class accuracy (%):
+Class             2D        1D   Delta (1D-2D)
+----------------------------------------------
+yes           98.84%    98.02%          -0.82%
+no            96.79%    93.91%          -2.88%
+up            95.17%    95.71%          +0.54%
+down          94.04%    95.91%          +1.87%
+left          96.67%    94.56%          -2.11%
+right         99.29%    98.59%          -0.70%
+on            95.66%    96.35%          +0.69%
+off           94.47%    91.62%          -2.85%
+stop          93.80%    96.21%          +2.41%
+go            94.85%    96.56%          +1.71%
+
+Overall accuracy delta (1D - 2D): -0.21 percentage points
+Parameter ratio (1D / 2D): 2.00x
+
+Notes for ADR (A3.3):
+- 2D mel-spectrogram representation provides explicit time-frequency
+  structure as input, which the 1D model must learn implicitly from
+  raw waveform via its receptive field.
+- Compare accuracy-per-parameter and inference latency when deciding
+  between representations for the FPGA deployment target.
