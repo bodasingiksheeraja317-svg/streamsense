@@ -21,8 +21,9 @@ import os
 import random
 from pathlib import Path
 
+import numpy as np
+import soundfile as sf
 import torch
-import torchaudio
 from torch.utils.data import Dataset
 
 # ── Root path — environment-aware ─────────────────────────────────────────
@@ -84,8 +85,28 @@ class StreamSenseDataset1D(Dataset):
         return len(self.entries)
 
     def _load_waveform(self, path: Path) -> torch.Tensor:
-        """Load WAV, mono, pad/crop to FRAME_LEN -> [1, 16000] float32"""
-        waveform, sr = torchaudio.load(str(path))
+        """
+        Load WAV via soundfile (NOT torchaudio.load) -> mono, pad/crop to
+        FRAME_LEN -> [1, 16000] float32.
+
+        Uses soundfile directly rather than torchaudio.load because recent
+        torchaudio versions (e.g. 2.11.0 on Colab) route loading through a
+        torchcodec/FFmpeg backend that can fail with
+        "RuntimeError: SingleStreamDecoder ..." on some environments, and
+        torchaudio.set_audio_backend() has been removed in these versions
+        so the legacy backend can no longer be force-selected. soundfile
+        reads WAV files directly via libsndfile and avoids this entirely.
+        """
+        data, sr = sf.read(str(path), dtype="float32", always_2d=True)
+        # data: [T, C] from soundfile (note: channel-LAST, opposite of
+        # torchaudio's [C, T] convention) -> convert to [C, T]
+        waveform = torch.from_numpy(data.T)  # [C, T]
+
+        if sr != 16000:
+            # Speech Commands v2 is 16kHz; this guards against any
+            # mismatched files rather than silently mishandling them.
+            import torchaudio.functional as AF
+            waveform = AF.resample(waveform, sr, 16000)
 
         if waveform.shape[0] > 1:
             waveform = waveform.mean(dim=0, keepdim=True)
