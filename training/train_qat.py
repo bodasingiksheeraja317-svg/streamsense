@@ -48,7 +48,7 @@ import brevitas.nn as qnn
 from brevitas.quant import Int8WeightPerTensorFloat, Int8ActPerTensorFloat
 
 # Your existing modules (available after git clone + sys.path)
-from dataset import get_dataloaders   # reuse existing dataloader
+from dataset import get_dataloader
 from mel_pipeline import preprocess   # MPIC v1.0 — do not modify
 
 # =============================================================================
@@ -264,13 +264,18 @@ def main():
     # Dataloaders — reuse existing dataset.py
     # ------------------------------------------------------------------
     # dataset.py expects: data_dir, splits_dir, batch_size, augment(bool)
-    train_loader, val_loader, _ = get_dataloaders(
-        data_dir   = DATA_EXTRACT_DIR,
-        splits_dir = SPLITS_DIR,
-        batch_size = BATCH_SIZE,
-        augment    = True,
-        seed       = SEED,
-    )
+    train_loader = get_dataloader(
+       split_file  = os.path.join(SPLITS_DIR, 'train_files.txt'),
+       is_train    = True,
+       batch_size  = BATCH_SIZE,
+       num_workers = 0,
+     )
+    val_loader = get_dataloader(
+       split_file  = os.path.join(SPLITS_DIR, 'val_files.txt'),
+       is_train    = False,
+       batch_size  = BATCH_SIZE,
+       num_workers = 0,
+     )
     print(f"Train batches: {len(train_loader)} | Val batches: {len(val_loader)}")
 
     # ------------------------------------------------------------------
