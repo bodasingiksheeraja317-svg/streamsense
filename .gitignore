@@ -5,3 +5,4 @@ streamsense-env-win/
 __pycache__/
 *.pyc
 onnx_models/
+data/splits/

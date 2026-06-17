@@ -1,0 +1,39 @@
+{
+  "version": "1.0",
+  "sample_rate": 16000,
+  "frame_len": 16000,
+  "n_fft": 512,
+  "hop_length": 160,
+  "n_mels": 64,
+  "window": "hann_periodic",
+  "center": false,
+  "power": 2.0,
+  "log_scale": "10*log10(mel + 1e-10)",
+  "clip_floor_db": -80.0,
+  "global_mean": -30.785545,
+  "global_std": 22.157099,
+  "mel_shape": [
+    64,
+    97
+  ],
+  "input_tensor_shape": [
+    1,
+    1,
+    64,
+    97
+  ],
+  "input_tensor_name": "input",
+  "output_tensor_name": "logits",
+  "output_shape": [
+    1,
+    10
+  ],
+  "output_dtype": "float32",
+  "output_scale_zero_point": "N/A (QDQ INT8 model has float32 I/O, identical to FP32)",
+  "model_format": "ONNX (opset per export_onnx.ipynb); QDQ INT8 via quantize_ptq.ipynb",
+  "tolerance": {
+    "same_implementation": 0.0001,
+    "cross_implementation": 0.0005,
+    "manifest_value": 0.0005
+  }
+}

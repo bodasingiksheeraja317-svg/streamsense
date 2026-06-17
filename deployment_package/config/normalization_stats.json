@@ -1,0 +1,14 @@
+{
+  "global_mean": -30.785544706009965,
+  "global_std": 22.157099125788548,
+  "n_files": 26984,
+  "n_elements": 167516672,
+  "n_errors": 0,
+  "mpic_version": "1.0",
+  "n_fft": 512,
+  "hop_length": 160,
+  "n_mels": 64,
+  "center": false,
+  "clip_floor_db": -80.0,
+  "log_eps": 1e-10
+}
