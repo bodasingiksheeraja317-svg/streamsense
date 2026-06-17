@@ -23,15 +23,22 @@ import torch
 import torch.nn as nn
 
 import brevitas.nn as qnn
-from brevitas.quant import Int8ActPerTensorFloat, Int8WeightPerTensorFloat
+from brevitas.quant import Int8ActPerTensorFixedPoint, Int8WeightPerTensorFloat
 
 
 # ── Quantization configs ────────────────────────────────────────────────────────
-# Per-tensor INT8 symmetric — matches the PTQ configuration from quantize_ptq.ipynb
-# so PTQ vs QAT results are directly comparable.
+# Per-tensor INT8 — matches the PTQ configuration from quantize_ptq.ipynb.
+#
+# ACT_QUANT uses Int8ActPerTensorFixedPoint (NOT Int8ActPerTensorFloat).
+# Reason: Int8ActPerTensorFloat stores its scale as a running-statistics
+# *buffer* that Brevitas initialises on CPU and does not always move to the
+# correct device when .to(cuda) is called, causing:
+#   RuntimeError: Expected all tensors to be on the same device
+# Int8ActPerTensorFixedPoint stores its scale as an nn.Parameter, which
+# moves correctly with .to(device) and is still fully differentiable for QAT.
 
-WEIGHT_QUANT  = Int8WeightPerTensorFloat   # INT8 symmetric, per-tensor, weights
-ACT_QUANT     = Int8ActPerTensorFloat      # INT8 asymmetric, per-tensor, activations
+WEIGHT_QUANT  = Int8WeightPerTensorFloat    # INT8 symmetric, per-tensor, weights
+ACT_QUANT     = Int8ActPerTensorFixedPoint  # INT8 per-tensor activations (param-scale)
 
 # ── Architecture constants ─────────────────────────────────────────────────────
 NUM_CLASSES = 10
@@ -46,9 +53,17 @@ def _qconv_block(in_ch: int, out_ch: int, dropout: float = 0.25) -> nn.Sequentia
         → MaxPool2d → Dropout2d
 
     Quantization applied to:
-        - Conv weights (Int8WeightPerTensorFloat)
-        - ReLU output activations (Int8ActPerTensorFloat)
+        - Conv weights  : Int8WeightPerTensorFloat
+        - ReLU outputs  : Int8ActPerTensorFixedPoint
     MaxPool2d and BatchNorm2d are NOT quantized (fused at export time).
+
+    Both QuantReLU layers use return_quant_tensor=False.
+    Reason: return_quant_tensor=True outputs a QuantTensor, which causes the
+    *next* QuantConv2d to activate its internal input act_quant — a separate
+    Brevitas quantizer whose buffer lives on CPU and triggers:
+        RuntimeError: Expected all tensors to be on the same device
+    With return_quant_tensor=False, each QuantReLU emits a plain float32
+    tensor; QuantConv2d only applies weight quantization (no device mismatch).
 
     Args:
         in_ch   : Input channels
@@ -65,7 +80,7 @@ def _qconv_block(in_ch: int, out_ch: int, dropout: float = 0.25) -> nn.Sequentia
             weight_quant = WEIGHT_QUANT,
         ),
         nn.BatchNorm2d(out_ch),
-        qnn.QuantReLU(act_quant=ACT_QUANT, return_quant_tensor=True),
+        qnn.QuantReLU(act_quant=ACT_QUANT, return_quant_tensor=False),
 
         qnn.QuantConv2d(
             in_channels  = out_ch,
