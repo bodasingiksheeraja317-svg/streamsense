@@ -34,16 +34,21 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 # ---------------------------------------------------------------------------
 try:
     import brevitas.nn as qnn
-    from brevitas.quant import (
-        Int8WeightPerTensorFloat,
-        Int8ActPerTensorFloat,
-        Int4WeightPerTensorFloat,
-    )
+    from brevitas.quant import Int8WeightPerTensorFloat, Int8ActPerTensorFloat
 except ImportError:
     sys.exit(
         "\n[ERROR] Brevitas not found.\n"
-        "Install with:  pip install brevitas==0.10.2\n"
+        "Install with:  pip install brevitas\n"
     )
+
+# Int4WeightPerTensorFloat was added/renamed across Brevitas versions.
+# We define it ourselves from Int8WeightPerTensorFloat — always safe.
+try:
+    from brevitas.quant import Int4WeightPerTensorFloat
+except ImportError:
+    class Int4WeightPerTensorFloat(Int8WeightPerTensorFloat):
+        """4-bit weight quant — derived from Int8 base, bit_width overridden."""
+        bit_width = 4
 
 # ---------------------------------------------------------------------------
 # Path setup — works whether run from C:\STREAMSENSE or training/
