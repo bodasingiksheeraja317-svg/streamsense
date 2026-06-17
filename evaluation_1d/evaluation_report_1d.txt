@@ -9,7 +9,7 @@ Parameters       : 591,210
 Test samples     : 5779
 Test loss        : 0.1396
 Test accuracy    : 95.76%
-Inference time   : 4.43s (0.77 ms/sample)
+Inference time   : 195.06s (33.75 ms/sample)
 
 Per-class report:
               precision    recall  f1-score   support
