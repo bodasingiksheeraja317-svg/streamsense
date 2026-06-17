@@ -52,7 +52,7 @@ QAT_CKPT      = f"{DRIVE_OUTPUTS}/best_model_qat.pth"
 QONNX_OUT     = f"{DRIVE_OUTPUTS}/streamsense_model_qonnx.onnx"
 
 # Also save a local copy to the repo for git commit
-REPO_ONNX_DIR = "/content/STREAMSENSE/onnx_models"
+REPO_ONNX_DIR = "/content/streamsense/onnx_models"
 QONNX_REPO    = f"{REPO_ONNX_DIR}/streamsense_model_qonnx.onnx"
 
 DEVICE        = torch.device("cpu")   # export always on CPU

@@ -62,7 +62,7 @@ QAT_CKPT_OUT      = f"{DRIVE_OUTPUTS}/best_model_qat.pth"  # QAT output
 
 DATA_RAW_ZIP      = f"{DRIVE_ROOT}/data_raw.zip"            # raw dataset zip
 DATA_EXTRACT_DIR  = "/content/data"                         # local extract path
-SPLITS_DIR        = "/content/STREAMSENSE/data/splits"      # split .txt files
+SPLITS_DIR        = "/content/streamsense/data/splits"      # split .txt files
 
 # =============================================================================
 # SECTION 2 — Hyperparameters
