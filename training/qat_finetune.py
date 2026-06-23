@@ -363,9 +363,20 @@ def run_gv1k_gate(model: nn.Module, gvk_dir: Path, device: torch.device) -> floa
 # ── Training helpers ──────────────────────────────────────────────────────────
 
 def _freeze_backbone(model: StreamSenseWrapper):
-    """Freeze all backbone parameters.  embed_head and quantizer scales stay trainable."""
-    for param in model.backbone.parameters():
-        param.requires_grad_(False)
+    """
+    Freeze backbone weight/bias parameters only.
+    Brevitas quantizer scale factors (named 'scale' or containing 'scaling')
+    must stay trainable so the quantizer calibrates during epochs 1-3.
+    embed_head parameters are untouched (they stay trainable).
+    """
+    for name, param in model.backbone.named_parameters():
+        # Keep Brevitas quantizer scale factors trainable.
+        # They are identified by the substring 'scaling' in their parameter name
+        # (e.g. 'block1.0.input_quant.fused_activation_quant_proxy.tensor_quant.scaling_impl.value').
+        if "scaling" in name or "scale" in name:
+            param.requires_grad_(True)
+        else:
+            param.requires_grad_(False)
 
 
 def _unfreeze_all(model: StreamSenseWrapper):
@@ -541,10 +552,10 @@ def main():
     print(f"  Train batches : {len(train_loader)}")
     print(f"  Val   batches : {len(val_loader)}")
 
-    # ── Optimizer and criterion ───────────────────────────────────────────────
+    # ── Criterion ─────────────────────────────────────────────────────────────
     criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-
+    # Optimizer is built after freeze so it only tracks trainable parameters.
+    # It will be rebuilt at epoch 4 when the backbone is unfrozen.
     best_val_acc  = 0.0
     best_ckpt_saved = False
 
@@ -554,14 +565,22 @@ def main():
     print(f"  Epoch  4+   : all parameters UNFROZEN")
     print()
 
+    optimizer = None  # will be (re)built when phase changes
+
     for epoch in range(1, args.epochs + 1):
 
-        # Phase 1: epochs 1-3 freeze backbone
+        # Phase 1: epochs 1-3 — freeze backbone weights, keep quantizer scales trainable
         if epoch == 1:
             _freeze_backbone(model)
+            trainable_params = [p for p in model.parameters() if p.requires_grad]
+            optimizer = torch.optim.Adam(trainable_params, lr=args.lr)
             print(f"  [Epoch {epoch}] Backbone FROZEN.  Trainable params: {_count_trainable(model):,}")
+
+        # Phase 2: epoch 4+ — unfreeze everything and rebuild optimizer
         elif epoch == 4:
             _unfreeze_all(model)
+            trainable_params = [p for p in model.parameters() if p.requires_grad]
+            optimizer = torch.optim.Adam(trainable_params, lr=args.lr)
             print(f"  [Epoch {epoch}] All parameters UNFROZEN.  Trainable params: {_count_trainable(model):,}")
 
         train_loss = train_one_epoch(model, train_loader, criterion, optimizer, device, epoch)
