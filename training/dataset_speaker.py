@@ -84,10 +84,30 @@ class SpeakerDataset(Dataset):
                 self.records.append((filepath, speaker_id, class_label))
                 self.speaker_to_indices[speaker_id].append(row_idx)
 
+        # ── remap raw speaker_ids to contiguous 0-indexed range ───────────
+        # Raw IDs are assigned globally across all splits, so train IDs are
+        # NOT 0…N-1. ArcFace / cross_entropy requires labels in [0, n_classes).
+        raw_ids_sorted = sorted(self.speaker_to_indices.keys())
+        self._sid_remap: dict[int, int] = {
+            raw: idx for idx, raw in enumerate(raw_ids_sorted)
+        }
+
+        # Rebuild records and speaker_to_indices with remapped IDs
+        remapped_records: list[tuple[str, int, int]] = []
+        remapped_s2i: dict[int, list[int]] = defaultdict(list)
+        for row_idx, (fp, raw_sid, cls) in enumerate(self.records):
+            new_sid = self._sid_remap[raw_sid]
+            remapped_records.append((fp, new_sid, cls))
+            remapped_s2i[new_sid].append(row_idx)
+
+        self.records = remapped_records
+        self.speaker_to_indices = remapped_s2i
+
         self.n_speakers: int = len(self.speaker_to_indices)
         print(
             f"[SpeakerDataset] {self.csv_path.name}: "
             f"{len(self.records)} utterances, {self.n_speakers} speakers"
+            f"  (IDs remapped 0…{self.n_speakers - 1})"
         )
 
     # ── Dataset interface ─────────────────────────────────────────────────────
