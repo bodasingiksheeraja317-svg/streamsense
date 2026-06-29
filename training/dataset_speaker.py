@@ -120,13 +120,12 @@ class SpeakerDataset(Dataset):
         if self.augment:
             waveform = _augment_waveform(waveform)
 
-        # ── MPIC v1.0 mel preprocessing ───────────────────────────────────
-        # mel_pipeline.preprocess takes np.ndarray [16000] float32
-        # and returns np.ndarray [1, 1, 64, 97]
-        wav_np = waveform.squeeze(0).numpy()   # [16000]
-        mel    = _mel_preprocess(wav_np)        # [1, 1, 64, 97]
+       # ── MPIC v1.0 mel preprocessing ───────────────────────────────────
+        # mel_pipeline.preprocess accepts a torch.Tensor and returns
+        # torch.Tensor [1, 1, 64, 97] float32 — no numpy conversion needed.
+        mel = _mel_preprocess(waveform.squeeze(0))   # pass [16000] tensor
 
-        mel_tensor = torch.from_numpy(mel).squeeze(0)  # [1, 64, 97]
+        mel_tensor = mel.squeeze(0)                  # [1, 1, 64, 97] → [1, 64, 97]
 
         return mel_tensor, speaker_id, class_label
 
