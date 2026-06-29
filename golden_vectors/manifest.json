@@ -43,8 +43,16 @@
       "mel_min_db": -68.7522,
       "norm_mean": 0.831749,
       "norm_std": 1.108476,
-      "expected_top1_index": null,
-      "size_validated": true
+      "expected_top1_index": 0,
+      "size_validated": true,
+      "expected_top1_label": "yes",
+      "top1_source_model": "streamsense_multihead_fp32.onnx (ORT)",
+      "top1_correct_vs_label": true,
+      "top1_inference_detail": {
+        "fp32_multihead_pred": 0,
+        "qonnx_pred": 0,
+        "fp32_singlehd_pred": 0
+      }
     },
     "1": {
       "gv_name": "GV_01_no",
@@ -75,8 +83,16 @@
       "mel_min_db": -53.1259,
       "norm_mean": 1.150412,
       "norm_std": 0.920947,
-      "expected_top1_index": null,
-      "size_validated": true
+      "expected_top1_index": 1,
+      "size_validated": true,
+      "expected_top1_label": "no",
+      "top1_source_model": "streamsense_multihead_fp32.onnx (ORT)",
+      "top1_correct_vs_label": true,
+      "top1_inference_detail": {
+        "fp32_multihead_pred": 1,
+        "qonnx_pred": 1,
+        "fp32_singlehd_pred": 1
+      }
     },
     "2": {
       "gv_name": "GV_02_up",
@@ -107,8 +123,16 @@
       "mel_min_db": -78.3372,
       "norm_mean": -0.006762,
       "norm_std": 0.873004,
-      "expected_top1_index": null,
-      "size_validated": true
+      "expected_top1_index": 2,
+      "size_validated": true,
+      "expected_top1_label": "up",
+      "top1_source_model": "streamsense_multihead_fp32.onnx (ORT)",
+      "top1_correct_vs_label": true,
+      "top1_inference_detail": {
+        "fp32_multihead_pred": 2,
+        "qonnx_pred": 2,
+        "fp32_singlehd_pred": 2
+      }
     },
     "3": {
       "gv_name": "GV_03_down",
@@ -139,8 +163,16 @@
       "mel_min_db": -36.991,
       "norm_mean": 1.266948,
       "norm_std": 0.593027,
-      "expected_top1_index": null,
-      "size_validated": true
+      "expected_top1_index": 3,
+      "size_validated": true,
+      "expected_top1_label": "down",
+      "top1_source_model": "streamsense_multihead_fp32.onnx (ORT)",
+      "top1_correct_vs_label": true,
+      "top1_inference_detail": {
+        "fp32_multihead_pred": 3,
+        "qonnx_pred": 3,
+        "fp32_singlehd_pred": 3
+      }
     },
     "4": {
       "gv_name": "GV_04_left",
@@ -171,8 +203,16 @@
       "mel_min_db": -78.1389,
       "norm_mean": 0.078276,
       "norm_std": 1.026232,
-      "expected_top1_index": null,
-      "size_validated": true
+      "expected_top1_index": 4,
+      "size_validated": true,
+      "expected_top1_label": "left",
+      "top1_source_model": "streamsense_multihead_fp32.onnx (ORT)",
+      "top1_correct_vs_label": true,
+      "top1_inference_detail": {
+        "fp32_multihead_pred": 4,
+        "qonnx_pred": 4,
+        "fp32_singlehd_pred": 4
+      }
     },
     "5": {
       "gv_name": "GV_05_right",
@@ -203,8 +243,16 @@
       "mel_min_db": -50.0679,
       "norm_mean": 1.271006,
       "norm_std": 0.629346,
-      "expected_top1_index": null,
-      "size_validated": true
+      "expected_top1_index": 5,
+      "size_validated": true,
+      "expected_top1_label": "right",
+      "top1_source_model": "streamsense_multihead_fp32.onnx (ORT)",
+      "top1_correct_vs_label": true,
+      "top1_inference_detail": {
+        "fp32_multihead_pred": 5,
+        "qonnx_pred": 5,
+        "fp32_singlehd_pred": 5
+      }
     },
     "6": {
       "gv_name": "GV_06_on",
@@ -235,8 +283,16 @@
       "mel_min_db": -51.0607,
       "norm_mean": 1.206507,
       "norm_std": 0.884991,
-      "expected_top1_index": null,
-      "size_validated": true
+      "expected_top1_index": 6,
+      "size_validated": true,
+      "expected_top1_label": "on",
+      "top1_source_model": "streamsense_multihead_fp32.onnx (ORT)",
+      "top1_correct_vs_label": true,
+      "top1_inference_detail": {
+        "fp32_multihead_pred": 6,
+        "qonnx_pred": 6,
+        "fp32_singlehd_pred": 6
+      }
     },
     "7": {
       "gv_name": "GV_07_off",
@@ -267,8 +323,16 @@
       "mel_min_db": -33.8141,
       "norm_mean": 0.848212,
       "norm_std": 0.676785,
-      "expected_top1_index": null,
-      "size_validated": true
+      "expected_top1_index": 7,
+      "size_validated": true,
+      "expected_top1_label": "off",
+      "top1_source_model": "streamsense_multihead_fp32.onnx (ORT)",
+      "top1_correct_vs_label": true,
+      "top1_inference_detail": {
+        "fp32_multihead_pred": 7,
+        "qonnx_pred": 7,
+        "fp32_singlehd_pred": 7
+      }
     },
     "8": {
       "gv_name": "GV_08_stop",
@@ -299,8 +363,16 @@
       "mel_min_db": -41.915,
       "norm_mean": 1.367446,
       "norm_std": 0.572776,
-      "expected_top1_index": null,
-      "size_validated": true
+      "expected_top1_index": 8,
+      "size_validated": true,
+      "expected_top1_label": "stop",
+      "top1_source_model": "streamsense_multihead_fp32.onnx (ORT)",
+      "top1_correct_vs_label": true,
+      "top1_inference_detail": {
+        "fp32_multihead_pred": 8,
+        "qonnx_pred": 8,
+        "fp32_singlehd_pred": 8
+      }
     },
     "9": {
       "gv_name": "GV_09_go",
@@ -331,8 +403,28 @@
       "mel_min_db": -33.5064,
       "norm_mean": 1.234731,
       "norm_std": 0.558215,
-      "expected_top1_index": null,
-      "size_validated": true
+      "expected_top1_index": 9,
+      "size_validated": true,
+      "expected_top1_label": "go",
+      "top1_source_model": "streamsense_multihead_fp32.onnx (ORT)",
+      "top1_correct_vs_label": true,
+      "top1_inference_detail": {
+        "fp32_multihead_pred": 9,
+        "qonnx_pred": 9,
+        "fp32_singlehd_pred": 9
+      }
     }
+  },
+  "top1_population_meta": {
+    "populated_by": "training/populate_gv_top1.py",
+    "timestamp": "2026-06-24 15:14:31",
+    "authority_model": "streamsense_multihead_fp32.onnx (ORT)",
+    "authority_model_path": "C:\\STREAMSENSE\\onnx_models\\streamsense_multihead_fp32.onnx",
+    "models_run": {
+      "fp32_multihead": "C:\\STREAMSENSE\\onnx_models\\streamsense_multihead_fp32.onnx",
+      "qonnx": "C:\\STREAMSENSE\\onnx_models\\streamsense_multihead.qonnx",
+      "fp32_singlehd": "C:\\STREAMSENSE\\onnx_models\\streamsense_model_fp32.onnx"
+    },
+    "note": "expected_top1_index comes from the authority model listed above. All available models are run and logged; disagreements are flagged. This field was previously null in the original generate_golden.py output."
   }
 }

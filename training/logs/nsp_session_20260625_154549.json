@@ -1,0 +1,16 @@
+{
+  "session_id": 1782382549463158,
+  "host": "192.168.0.135",
+  "port": 7654,
+  "mode": "client",
+  "start_time": "2026-06-25T15:45:49.211256",
+  "end_time": "2026-06-25T15:46:30.322399",
+  "duration_sec": 41.111,
+  "packets_sent": 2362,
+  "bytes_sent": 151290824,
+  "frames_total": 2362,
+  "dropped_frames": 0,
+  "audio_duration_sec": 2362.0,
+  "sources_project": 0,
+  "sources_unknown": 0
+}

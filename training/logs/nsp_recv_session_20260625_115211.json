@@ -1,0 +1,18 @@
+{
+  "role": "receiver",
+  "host": "127.0.0.1",
+  "port": 7654,
+  "mode": "client",
+  "session_id": 1782368531461299,
+  "start_time": "2026-06-25T11:52:11.461299",
+  "end_time": "2026-06-25T11:52:15.648923",
+  "duration_sec": 4.188,
+  "packets_received": 10,
+  "bytes_received": 640520,
+  "data_frames": 10,
+  "eof_frames": 0,
+  "validation_errors": 0,
+  "sequence_gaps": 0,
+  "mean_latency_us": 1289.0,
+  "audio_duration_sec": 10.0
+}

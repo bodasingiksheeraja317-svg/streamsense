@@ -4,5 +4,9 @@ data/raw/
 streamsense-env-win/
 __pycache__/
 *.pyc
-onnx_models/
-data/splits/
+unknown_data/
+golden_vectors_10_matlab/
+golden_vectors_1000/
+checkpoints/*.pth
+checkpoints_1d/*.pth
+.ipynb_checkpoints/

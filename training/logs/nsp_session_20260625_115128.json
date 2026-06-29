@@ -1,0 +1,16 @@
+{
+  "session_id": 1782368531461299,
+  "host": "127.0.0.1",
+  "port": 7654,
+  "mode": "server",
+  "start_time": "2026-06-25T11:51:28.909644",
+  "end_time": "2026-06-25T11:52:15.682627",
+  "duration_sec": 46.773,
+  "packets_sent": 10,
+  "bytes_sent": 640520,
+  "frames_total": 10,
+  "dropped_frames": 0,
+  "audio_duration_sec": 10.0,
+  "sources_project": 0,
+  "sources_unknown": 0
+}
