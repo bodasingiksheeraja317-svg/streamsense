@@ -136,13 +136,21 @@ class SpeakerNet(nn.Module):
 
         loaded, skipped = 0, 0
         for k, v in src_sd.items():
-            prefix = k.split(".")[0]
-            if prefix in backbone_keys and k in dst_sd:
-                if dst_sd[k].shape == v.shape:
-                    dst_sd[k] = v
+            # Strip one level of wrapper prefix (e.g. "net.", "model.", "backbone.")
+            # so that "net.block1.block.0.weight" becomes "block1.block.0.weight"
+            bare = k
+            for pfx in ("net.", "model.", "backbone.", "encoder."):
+                if k.startswith(pfx):
+                    bare = k[len(pfx):]
+                    break
+
+            prefix = bare.split(".")[0]
+            if prefix in backbone_keys and bare in dst_sd:
+                if dst_sd[bare].shape == v.shape:
+                    dst_sd[bare] = v
                     loaded += 1
                 else:
-                    print(f"  [WARN] shape mismatch for {k}: src {v.shape} vs dst {dst_sd[k].shape}")
+                    print(f"  [WARN] shape mismatch for {bare}: src {v.shape} vs dst {dst_sd[bare].shape}")
                     skipped += 1
             else:
                 skipped += 1
