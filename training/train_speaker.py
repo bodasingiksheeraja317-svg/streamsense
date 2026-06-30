@@ -233,9 +233,13 @@ def train(args: argparse.Namespace) -> None:
     if resume_path.exists():
         resume_ckpt = torch.load(resume_path, map_location=device)
         net.load_state_dict(resume_ckpt["net_state"])
-        head.load_state_dict(resume_ckpt["head_state"])
-        print(f"[train_speaker] Resumed from {resume_path}  "
-              f"(EER={resume_ckpt['eer']:.4f}, Rank1={resume_ckpt['rank1']:.4f})")
+        if "head_state" in resume_ckpt:
+            head.load_state_dict(resume_ckpt["head_state"])
+            print(f"[train_speaker] Resumed net+head from {resume_path}  "
+                  f"(EER={resume_ckpt['eer']:.4f}, Rank1={resume_ckpt['rank1']:.4f})")
+        else:
+            print(f"[train_speaker] Resumed net only (no head_state in ckpt)  "
+                  f"(EER={resume_ckpt['eer']:.4f}, Rank1={resume_ckpt['rank1']:.4f})")
     else:
         print("[train_speaker] No speaker checkpoint found, starting fresh.")
 
