@@ -228,6 +228,17 @@ def train(args: argparse.Namespace) -> None:
     else:
         print(f"[WARN] Backbone checkpoint not found at {backbone_path}. Training from scratch.")
 
+    # ── resume from previous speaker checkpoint if it exists ──────────────
+    resume_path = ROOT / args.best_path
+    if resume_path.exists():
+        resume_ckpt = torch.load(resume_path, map_location=device)
+        net.load_state_dict(resume_ckpt["net_state"])
+        head.load_state_dict(resume_ckpt["head_state"])
+        print(f"[train_speaker] Resumed from {resume_path}  "
+              f"(EER={resume_ckpt['eer']:.4f}, Rank1={resume_ckpt['rank1']:.4f})")
+    else:
+        print("[train_speaker] No speaker checkpoint found, starting fresh.")
+
     # ── optimiser ─────────────────────────────────────────────────────────
     # train backbone + projection + arcface head jointly
     params = list(net.parameters()) + list(head.parameters())
@@ -304,13 +315,14 @@ def train(args: argparse.Namespace) -> None:
             best_rank1 = rank1
             torch.save(
                 {
-                    "epoch"     : epoch,
-                    "net_state" : net.state_dict(),
-                    "eer"       : eer,
-                    "rank1"     : rank1,
-                    "n_speakers": n_speakers,
-                    "embed_dim" : 128,
-                    "args"      : vars(args),
+                    "epoch"      : epoch,
+                    "net_state"  : net.state_dict(),
+                    "head_state" : head.state_dict(),
+                    "eer"        : eer,
+                    "rank1"      : rank1,
+                    "n_speakers" : n_speakers,
+                    "embed_dim"  : 128,
+                    "args"       : vars(args),
                 },
                 best_path,
             )
