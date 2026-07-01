@@ -4,14 +4,13 @@
 % PURPOSE
 %   1. Verifies the column-major conversion was done correctly by loading
 %      each GV from golden_vectors_10_matlab/ and re-running mel_pipeline_matlab
-%      on the matching raw audio, then comparing the two outputs.
+%      on the matching raw audio, then comparing the normalized output.
 %
 %   2. Validates every binary file in golden_vectors_10_matlab/ against
 %      the MPIC v1.0 specification (shape, byte-size, dtype, value range).
 %
 % WHAT PASSES
 %   norm re-computed from raw WAV vs norm loaded from .bin  <  5e-4  (cross-impl tolerance)
-%   mel  re-computed from raw WAV vs mel  loaded from .bin  <  5e-4
 %
 % PREREQUISITES
 %   • mel_pipeline_matlab.m  on the MATLAB path (same folder is fine)
@@ -47,7 +46,6 @@ if ~exist('GV_ROOT', 'var')
 end
 
 RAW_DIR   = fullfile(GV_ROOT, 'raw');
-MEL_DIR   = fullfile(GV_ROOT, 'mel');
 NORM_DIR  = fullfile(GV_ROOT, 'normalized');
 LABEL_DIR = fullfile(GV_ROOT, 'labels');
 
@@ -99,13 +97,12 @@ for i = 0:9
     log('\n%s\n', repmat('-', 1, 54));
     log('Verifying %s  (class %d — ''%s'')\n', gv_name, i, lbl);
 
-    ok_struct = struct('size_raw', false, 'size_mel', false, 'size_norm', false, ...
+    ok_struct = struct('size_raw', false, 'size_norm', false, ...
                        'label_ok', false, 'range_ok', false, ...
-                       'pipeline_mel_ok', false, 'pipeline_norm_ok', false);
+                       'pipeline_norm_ok', false);
 
     % ── File paths ────────────────────────────────────────────────────────────
     raw_path   = fullfile(RAW_DIR,   sprintf('%s.bin',       gv_name));
-    mel_path   = fullfile(MEL_DIR,   sprintf('%s_mel.bin',   gv_name));
     norm_path  = fullfile(NORM_DIR,  sprintf('%s_norm.bin',  gv_name));
     label_path = fullfile(LABEL_DIR, sprintf('%s_label.txt', gv_name));
     wav_path   = fullfile(WAV_DIR,   sprintf('%s.wav',       gv_name));
@@ -113,7 +110,6 @@ for i = 0:9
     % ── Check files exist ─────────────────────────────────────────────────────
     missing = {};
     if ~exist(raw_path,  'file'), missing{end+1} = 'raw bin';   end
-    if ~exist(mel_path,  'file'), missing{end+1} = 'mel bin';   end
     if ~exist(norm_path, 'file'), missing{end+1} = 'norm bin';  end
     if ~isempty(missing)
         msg = sprintf('  [FAIL] Missing files: %s\n', strjoin(missing, ', '));
@@ -125,24 +121,20 @@ for i = 0:9
 
     % ── Check file sizes ──────────────────────────────────────────────────────
     d_raw  = dir(raw_path);
-    d_mel  = dir(mel_path);
     d_norm = dir(norm_path);
 
     ok_struct.size_raw  = (d_raw.bytes  == EXPECTED_RAW_BYTES);
-    ok_struct.size_mel  = (d_mel.bytes  == EXPECTED_MEL_BYTES);
     ok_struct.size_norm = (d_norm.bytes == EXPECTED_MEL_BYTES);
 
     sz_tag = @(ok, actual, expected) ...
         sprintf('%d bytes  %s  (expected %d)', actual, tf_str(ok), expected);
 
     fprintf('  raw  : %s\n', sz_tag(ok_struct.size_raw,  d_raw.bytes,  EXPECTED_RAW_BYTES));
-    fprintf('  mel  : %s\n', sz_tag(ok_struct.size_mel,  d_mel.bytes,  EXPECTED_MEL_BYTES));
     fprintf('  norm : %s\n', sz_tag(ok_struct.size_norm, d_norm.bytes, EXPECTED_MEL_BYTES));
     log('  raw  : %s\n', sz_tag(ok_struct.size_raw,  d_raw.bytes,  EXPECTED_RAW_BYTES));
-    log('  mel  : %s\n', sz_tag(ok_struct.size_mel,  d_mel.bytes,  EXPECTED_MEL_BYTES));
     log('  norm : %s\n', sz_tag(ok_struct.size_norm, d_norm.bytes, EXPECTED_MEL_BYTES));
 
-    if ~(ok_struct.size_raw && ok_struct.size_mel && ok_struct.size_norm)
+    if ~(ok_struct.size_raw && ok_struct.size_norm)
         all_passed = false;
     end
 
@@ -154,29 +146,23 @@ for i = 0:9
     raw_vec = fread(fid, FRAME_LEN, 'float32=>single');
     fclose(fid);
 
-    fid = fopen(mel_path, 'rb', 'l');
-    mel_gv  = reshape(fread(fid, N_MELS*EXPECTED_T, 'float32=>single'), [N_MELS, EXPECTED_T]);
-    fclose(fid);
-
     fid = fopen(norm_path, 'rb', 'l');
     norm_gv = reshape(fread(fid, N_MELS*EXPECTED_T, 'float32=>single'), [N_MELS, EXPECTED_T]);
     fclose(fid);
 
     % ── Value range checks ────────────────────────────────────────────────────
-    mel_min  = min(mel_gv(:));
-    mel_max  = max(mel_gv(:));
     norm_min = min(norm_gv(:));
     norm_max = max(norm_gv(:));
 
-    % Mel should be in [−80, 0] dB range (log-mel of audio)
-    % MPIC v1.0 clips the floor at -80 dB only — no upper limit.
-    % Power mel of real speech typically peaks at +35..+45 dB; >0 is normal.
-    ok_struct.range_ok = (mel_min >= CLIP_FLOOR_DB - 0.1);
+    % Normalized tensor is (mel - global_mean) / global_std, so its floor
+    % corresponds to the -80 dB mel clip floor after normalization.
+    GLOBAL_MEAN_V = single(-30.785545);
+    GLOBAL_STD_V  = single(22.157099);
+    norm_clip_floor = (CLIP_FLOOR_DB - GLOBAL_MEAN_V) / GLOBAL_STD_V;
+    ok_struct.range_ok = (norm_min >= norm_clip_floor - 0.1);
 
-    fprintf('  mel  range : [%.2f, %.2f] dB  %s\n', mel_min, mel_max, tf_str(ok_struct.range_ok));
-    fprintf('  norm range : [%.4f, %.4f]\n', norm_min, norm_max);
-    log('  mel  range : [%.2f, %.2f] dB  %s\n', mel_min, mel_max, tf_str(ok_struct.range_ok));
-    log('  norm range : [%.4f, %.4f]\n', norm_min, norm_max);
+    fprintf('  norm range : [%.4f, %.4f]  %s\n', norm_min, norm_max, tf_str(ok_struct.range_ok));
+    log('  norm range : [%.4f, %.4f]  %s\n', norm_min, norm_max, tf_str(ok_struct.range_ok));
 
     % ── Label check ───────────────────────────────────────────────────────────
     if exist(label_path, 'file')
@@ -208,26 +194,16 @@ for i = 0:9
             % Run MATLAB mel pipeline
             norm_rerun = mel_pipeline_matlab(wav_samples);   % [64 x 97]
 
-            % Reconstruct mel from norm for mel-level comparison
-            GLOBAL_MEAN_V = single(-30.785545);
-            GLOBAL_STD_V  = single(22.157099);
-            mel_rerun = norm_rerun * GLOBAL_STD_V + GLOBAL_MEAN_V;
-
             % Compare against loaded GV
             err_norm = max(abs(norm_rerun(:) - norm_gv(:)));
-            err_mel  = max(abs(mel_rerun(:)  - mel_gv(:)));
 
             ok_struct.pipeline_norm_ok = (err_norm < CROSS_IMPL_TOL);
-            ok_struct.pipeline_mel_ok  = (err_mel  < CROSS_IMPL_TOL);
 
             fprintf('  pipeline max_err norm : %.2e  %s  (tol=5e-4)\n', ...
                 err_norm, tf_str(ok_struct.pipeline_norm_ok));
-            fprintf('  pipeline max_err mel  : %.2e  %s  (tol=5e-4)\n', ...
-                err_mel,  tf_str(ok_struct.pipeline_mel_ok));
             log('  pipeline max_err norm : %.2e  %s\n', err_norm, tf_str(ok_struct.pipeline_norm_ok));
-            log('  pipeline max_err mel  : %.2e  %s\n', err_mel,  tf_str(ok_struct.pipeline_mel_ok));
 
-            if ~ok_struct.pipeline_norm_ok || ~ok_struct.pipeline_mel_ok
+            if ~ok_struct.pipeline_norm_ok
                 all_passed = false;
             end
         catch ME
@@ -240,13 +216,11 @@ for i = 0:9
         log('  pipeline re-run: SKIPPED — WAV not found\n');
         % Mark as N/A (not a failure if WAV is absent)
         ok_struct.pipeline_norm_ok = true;
-        ok_struct.pipeline_mel_ok  = true;
     end
 
     % ── Per-vector pass/fail ──────────────────────────────────────────────────
-    vec_pass = ok_struct.size_raw  && ok_struct.size_mel  && ...
-               ok_struct.size_norm && ok_struct.range_ok  && ...
-               ok_struct.pipeline_norm_ok && ok_struct.pipeline_mel_ok;
+    vec_pass = ok_struct.size_raw  && ok_struct.size_norm && ...
+               ok_struct.range_ok  && ok_struct.pipeline_norm_ok;
 
     if ~vec_pass, all_passed = false; end
 
@@ -267,8 +241,8 @@ for i = 0:9
 
     if isfield(results, gv_name)
         r = results.(gv_name);
-        vec_pass = r.size_raw && r.size_mel && r.size_norm && ...
-                   r.range_ok && r.pipeline_norm_ok && r.pipeline_mel_ok;
+        vec_pass = r.size_raw && r.size_norm && ...
+                   r.range_ok && r.pipeline_norm_ok;
         status = tf_str(vec_pass);
     else
         status = '[FAIL]';

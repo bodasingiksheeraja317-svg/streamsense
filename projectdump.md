@@ -48,7 +48,6 @@ STREAMSENSE/
 │   ├── compute_normstats.py
 │   ├── dataset.py
 │   ├── dataset_1d.py
-│   ├── dataset_speaker.py
 │   ├── evaluate.py
 │   ├── evaluate_1d_comparison.py
 │   ├── evaluate_multihead_onnx.py
@@ -66,7 +65,6 @@ STREAMSENSE/
 │   ├── mel_pipeline_matlab.m
 │   ├── model.py
 │   ├── model_1d.py
-│   ├── model_speaker.py
 │   ├── nsp_receiver.py
 │   ├── nsp_sender.py
 │   ├── populate_gv_top1.py
@@ -78,15 +76,16 @@ STREAMSENSE/
 │   ├── test_integration.py
 │   ├── train.py
 │   ├── train_1d.py
-│   ├── train_speaker.py
 │   ├── verify_gv10_matlab.m
 │   └── verify_pipeline.py
 ├── unknown_data/ [...]
 ├── .gitattributes
 ├── .gitignore
 ├── class_labels.json
+├── fingerprinting.ipynb
 ├── qat_colab.ipynb
 ├── quick_predict.ipynb
+├── SpeakerNet_Train.ipynb
 ├── Streamsense.ipynb
 └── STREAMSENSE1D.ipynb
 ```
@@ -1097,236 +1096,6 @@ if __name__ == "__main__":
         assert x.dtype == torch.float32
 
     print("\n[PASS] Smoke test OK.")
-
-```
-
-### `training/dataset_speaker.py`
-
-```python
-"""
-dataset_speaker.py
-==================
-OSL-IPL-2026-INT-002  |  Track A  |  WA-3
-
-PyTorch Dataset and BalancedBatchSampler for speaker fingerprinting.
-
-Reads the speaker CSV manifests produced by build_speaker_dataset.py.
-Applies MPIC v1.0 mel preprocessing (mel_pipeline.preprocess) — no new
-normalization statistics; the frozen global stats remain in effect.
-
-Classes exported:
-    SpeakerDataset        — standard Map-style Dataset
-    BalancedBatchSampler  — yields M-speaker × K-utterance batches
-                            required for ArcFace / triplet training
-
-Usage:
-    from training.dataset_speaker import SpeakerDataset, BalancedBatchSampler
-
-    train_ds = SpeakerDataset("data/speaker_splits/speaker_train.csv")
-    sampler  = BalancedBatchSampler(train_ds, M=16, K=4)
-    loader   = DataLoader(train_ds, batch_sampler=sampler, num_workers=2)
-
-    for mel_tensors, speaker_ids, class_labels in loader:
-        ...   # mel_tensors: [B, 1, 64, 97], speaker_ids: [B], class_labels: [B]
-"""
-
-import csv
-import random
-from pathlib import Path
-from collections import defaultdict
-from typing import Iterator
-import sys, os
-
-import torch
-from torch.utils.data import Dataset, Sampler
-
-# ── mel_pipeline import ───────────────────────────────────────────────────────
-# mel_pipeline.py lives in training/ and exports a plain function `preprocess`.
-# Insert both this file's directory AND cwd/training so it resolves correctly
-# whether run locally (repo root) or in Colab (Drive path).
-_this_dir    = str(Path(__file__).resolve().parent)
-_cwd_training = str(Path(os.getcwd()) / 'training')
-for _p in [_this_dir, _cwd_training]:
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
-
-from mel_pipeline import preprocess as _mel_preprocess
-
-
-# ── SpeakerDataset ────────────────────────────────────────────────────────────
-
-class SpeakerDataset(Dataset):
-    """
-    Map-style Dataset over speaker CSV manifests.
-
-    Each item returns:
-        mel  : torch.Tensor  shape [1, 64, 97]  float32   (MPIC v1.0)
-        sid  : int            speaker integer ID
-        cls  : int            command class index (0-9)
-    """
-
-    def __init__(self, csv_path: str | Path, augment: bool = False) -> None:
-        """
-        Args:
-            csv_path : path to speaker_train/val/test.csv
-            augment  : if True, apply time-domain augmentation
-                       (same as dataset.py: circular shift, noise, amplitude)
-                       Only set True for the training split.
-        """
-        self.csv_path = Path(csv_path)
-        self.augment  = augment
-
-        # ── parse CSV ─────────────────────────────────────────────────────
-        self.records: list[tuple[str, int, int]] = []  # (filepath, speaker_id, class_label)
-        self.speaker_to_indices: dict[int, list[int]] = defaultdict(list)
-
-        with open(self.csv_path, newline="") as f:
-            reader = csv.DictReader(f)
-            for row_idx, row in enumerate(reader):
-                filepath    = row["filepath"]
-                speaker_id  = int(row["speaker_id"])
-                class_label = int(row["class_label"])
-                self.records.append((filepath, speaker_id, class_label))
-                self.speaker_to_indices[speaker_id].append(row_idx)
-
-        self.n_speakers: int = len(self.speaker_to_indices)
-        print(
-            f"[SpeakerDataset] {self.csv_path.name}: "
-            f"{len(self.records)} utterances, {self.n_speakers} speakers"
-        )
-
-    # ── Dataset interface ─────────────────────────────────────────────────────
-
-    def __len__(self) -> int:
-        return len(self.records)
-
-    def __getitem__(self, idx: int):
-        filepath, speaker_id, class_label = self.records[idx]
-
-        # ── load waveform ─────────────────────────────────────────────────
-        import torchaudio
-        waveform, sr = torchaudio.load(filepath)
-
-        if sr != 16_000:
-            waveform = torchaudio.functional.resample(waveform, sr, 16_000)
-
-        # mono downmix
-        if waveform.shape[0] > 1:
-            waveform = waveform.mean(dim=0, keepdim=True)
-
-        # pad / crop to exactly 16 000 samples
-        n = waveform.shape[-1]
-        if n < 16_000:
-            waveform = torch.nn.functional.pad(waveform, (0, 16_000 - n))
-        else:
-            waveform = waveform[..., :16_000]
-
-        # ── optional time-domain augmentation (training only) ─────────────
-        if self.augment:
-            waveform = _augment_waveform(waveform)
-
-        # ── MPIC v1.0 mel preprocessing ───────────────────────────────────
-        # mel_pipeline.preprocess takes np.ndarray [16000] float32
-        # and returns np.ndarray [1, 1, 64, 97]
-        wav_np = waveform.squeeze(0).numpy()   # [16000]
-        mel    = _mel_preprocess(wav_np)        # [1, 1, 64, 97]
-
-        mel_tensor = torch.from_numpy(mel).squeeze(0)  # [1, 64, 97]
-
-        return mel_tensor, speaker_id, class_label
-
-    # ── Convenience ───────────────────────────────────────────────────────────
-
-    @property
-    def speaker_ids(self) -> list[int]:
-        """Sorted list of unique speaker integer IDs in this split."""
-        return sorted(self.speaker_to_indices.keys())
-
-
-# ── Time-domain augmentation (mirrors dataset.py) ─────────────────────────────
-
-def _augment_waveform(waveform: torch.Tensor) -> torch.Tensor:
-    """
-    waveform: [1, 16000] float32
-    Applies circular shift, gaussian noise, amplitude scaling.
-    Same parameters as the original dataset.py.
-    """
-    wav = waveform.clone()
-    shift = random.randint(-3200, 3200)
-    wav = torch.roll(wav, shifts=shift, dims=-1)
-    wav = wav + torch.randn_like(wav) * 0.005
-    scale = random.uniform(0.8, 1.2)
-    wav = wav * scale
-    return wav
-
-
-# ── BalancedBatchSampler ──────────────────────────────────────────────────────
-
-class BalancedBatchSampler(Sampler):
-    """
-    Yields index lists of size M*K.
-
-    Each batch contains exactly M distinct speaker classes, each
-    contributing exactly K utterances. This guarantees valid
-    anchor-positive pairs in every batch — required by ArcFace and
-    hard-negative triplet mining.
-
-    Args:
-        dataset  : SpeakerDataset instance
-        M        : speakers per batch  (recommend 16)
-        K        : utterances per speaker per batch  (recommend 4)
-        drop_last: drop incomplete last batch
-        seed     : random seed
-    """
-
-    def __init__(
-        self,
-        dataset: SpeakerDataset,
-        M: int = 16,
-        K: int = 4,
-        drop_last: bool = True,
-        seed: int = 42,
-    ) -> None:
-        self.dataset = dataset
-        self.M       = M
-        self.K       = K
-        self._rng    = random.Random(seed)
-
-        self._eligible_speakers: list[int] = [
-            sid
-            for sid, indices in dataset.speaker_to_indices.items()
-            if len(indices) >= K
-        ]
-
-        dropped = dataset.n_speakers - len(self._eligible_speakers)
-        if dropped:
-            print(
-                f"[BalancedBatchSampler] Dropped {dropped} speakers with < {K} utterances. "
-                f"Eligible: {len(self._eligible_speakers)}"
-            )
-
-        if len(self._eligible_speakers) < M:
-            raise ValueError(
-                f"Need at least M={M} eligible speakers, found {len(self._eligible_speakers)}."
-            )
-
-        self._n_batches = len(self._eligible_speakers) // M
-
-    def __len__(self) -> int:
-        return self._n_batches
-
-    def __iter__(self) -> Iterator[list[int]]:
-        speakers = list(self._eligible_speakers)
-        self._rng.shuffle(speakers)
-
-        for batch_start in range(0, len(speakers) - self.M + 1, self.M):
-            batch_speakers = speakers[batch_start : batch_start + self.M]
-            batch_indices: list[int] = []
-            for sid in batch_speakers:
-                pool   = self.dataset.speaker_to_indices[sid]
-                chosen = self._rng.sample(pool, self.K)
-                batch_indices.extend(chosen)
-            yield batch_indices
 
 ```
 
@@ -6493,289 +6262,6 @@ if __name__ == "__main__":
 
 ```
 
-### `training/model_speaker.py`
-
-```python
-"""
-model_speaker.py
-================
-OSL-IPL-2026-INT-002  |  Track A  |  WA-3
-
-SpeakerNet: convolutional speaker-embedding model for fingerprinting.
-
-Architecture
-------------
-Backbone  : StreamSenseNet conv blocks 1-3 + GAP  (weights loaded from
-            best_model.pth; fine-tuned end-to-end during speaker training)
-Projection: Linear(128→256) + BN + ReLU → Linear(256→128) → L2-norm
-Output    : unit-norm embedding  [B, 128]  float32
-
-Training head (attached only during training, not exported):
-ArcFaceHead: cosine-based angular margin classifier over N_speakers
-
-The embedding dimension is frozen at 128 to match ERR v1.0  embed_dim.
-
-Usage
------
-    from training.model_speaker import SpeakerNet, ArcFaceHead
-
-    # Build and load pretrained backbone
-    net = SpeakerNet()
-    net.load_backbone("checkpoints/best_model.pth")
-
-    # Forward (inference)
-    emb = net(mel)           # [B, 128] unit-norm
-
-    # Training
-    head = ArcFaceHead(in_dim=128, n_classes=n_speakers)
-    logits = head(emb, labels)
-    loss = F.cross_entropy(logits, labels)
-"""
-
-import math
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from pathlib import Path
-
-# ── Embedding dimension (frozen into ERR v1.0) ───────────────────────────────
-EMBED_DIM = 128
-
-
-# ── Conv block (identical to StreamSenseNet for weight compatibility) ─────────
-
-class _ConvBlock(nn.Module):
-    """Two Conv2d + BN + ReLU + MaxPool + SpatialDropout2d."""
-
-    def __init__(self, in_ch: int, out_ch: int, dropout: float = 0.25) -> None:
-        super().__init__()
-        self.block = nn.Sequential(
-            nn.Conv2d(in_ch,  out_ch, 3, padding=1, bias=False),
-            nn.BatchNorm2d(out_ch),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(out_ch, out_ch, 3, padding=1, bias=False),
-            nn.BatchNorm2d(out_ch),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(2, 2),
-            nn.Dropout2d(dropout),   # spatial dropout
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.block(x)
-
-
-# ── SpeakerNet ────────────────────────────────────────────────────────────────
-
-class SpeakerNet(nn.Module):
-    """
-    Speaker embedding network.
-
-    Input  : [B, 1, 64, 97]  (MPIC v1.0 mel tensor)
-    Output : [B, 128]         unit-norm embedding
-
-    The conv backbone is identical in structure to StreamSenseNet so
-    that pre-trained weights can be loaded directly.
-    """
-
-    def __init__(self) -> None:
-        super().__init__()
-
-        # ── backbone (mirrors StreamSenseNet blocks 1-3 + GAP) ────────────
-        self.block1 = _ConvBlock(1,  32)
-        self.block2 = _ConvBlock(32, 64)
-        self.block3 = _ConvBlock(64, 128)
-        self.gap    = nn.AdaptiveAvgPool2d(1)   # [B, 128, 1, 1]
-
-        # ── projection head (new, speaker-specific) ───────────────────────
-        # Two-layer MLP: 128 → 256 → 128, with BN between layers
-        self.proj = nn.Sequential(
-            nn.Linear(128, 256, bias=False),
-            nn.BatchNorm1d(256),
-            nn.ReLU(inplace=True),
-            nn.Linear(256, EMBED_DIM, bias=False),
-        )
-
-        self._init_projection()
-
-    def _init_projection(self) -> None:
-        """Kaiming init for projection layers."""
-        for m in self.proj.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
-
-    # ── weight loading ────────────────────────────────────────────────────────
-
-    def load_backbone(self, ckpt_path: str | Path) -> None:
-        """
-        Load conv backbone weights from a StreamSenseNet checkpoint.
-        Only copies block1/block2/block3/gap weights; projection head
-        keeps its fresh initialisation.
-
-        Args:
-            ckpt_path : path to best_model.pth
-        """
-        ckpt_path = Path(ckpt_path)
-        if not ckpt_path.exists():
-            raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
-
-        raw = torch.load(ckpt_path, map_location="cpu")
-
-        # handle both bare state_dict and {"model_state": ...} formats
-        if isinstance(raw, dict) and "model_state" in raw:
-            src_sd = raw["model_state"]
-        elif isinstance(raw, dict) and all(isinstance(k, str) for k in raw):
-            src_sd = raw
-        else:
-            raise ValueError("Unrecognised checkpoint format.")
-
-        # keys that belong to the backbone
-        backbone_keys = {"block1", "block2", "block3", "gap"}
-        dst_sd = self.state_dict()
-
-        loaded, skipped = 0, 0
-        for k, v in src_sd.items():
-            prefix = k.split(".")[0]
-            if prefix in backbone_keys and k in dst_sd:
-                if dst_sd[k].shape == v.shape:
-                    dst_sd[k] = v
-                    loaded += 1
-                else:
-                    print(f"  [WARN] shape mismatch for {k}: src {v.shape} vs dst {dst_sd[k].shape}")
-                    skipped += 1
-            else:
-                skipped += 1
-
-        self.load_state_dict(dst_sd)
-        print(f"[SpeakerNet] Backbone loaded: {loaded} tensors copied, {skipped} skipped.")
-
-    # ── forward ───────────────────────────────────────────────────────────────
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            x : [B, 1, 64, 97]  MPIC v1.0 mel tensor
-        Returns:
-            embedding : [B, 128]  L2-normalised  (unit-norm)
-        """
-        # backbone
-        x = self.block1(x)          # [B,  32, 32, 48]
-        x = self.block2(x)          # [B,  64, 16, 24]
-        x = self.block3(x)          # [B, 128,  8, 12]
-        x = self.gap(x)             # [B, 128,  1,  1]
-        x = x.flatten(1)            # [B, 128]
-
-        # projection
-        x = self.proj(x)            # [B, 128]
-
-        # L2 normalise → unit-norm embeddings for cosine similarity
-        x = F.normalize(x, p=2, dim=1)
-        return x
-
-
-# ── ArcFace head ──────────────────────────────────────────────────────────────
-
-class ArcFaceHead(nn.Module):
-    """
-    Additive Angular Margin (ArcFace) classification head.
-
-    Reference: Deng et al. 2019  "ArcFace: Additive Angular Margin Loss
-    for Deep Face Recognition"  (CVPR 2019)
-
-    The weight matrix W is L2-normalised so that the logit for class c is:
-        s · cos(θ_c + m)   for the ground-truth class
-        s · cos(θ_c)       for all other classes
-
-    Args:
-        in_dim    : embedding dimension (128)
-        n_classes : number of speaker classes in the training split
-        s         : feature scale  (default 32.0)
-        m         : angular margin in radians  (default 0.50 ≈ 28.6°)
-    """
-
-    def __init__(
-        self,
-        in_dim: int,
-        n_classes: int,
-        s: float = 32.0,
-        m: float = 0.50,
-    ) -> None:
-        super().__init__()
-        self.in_dim    = in_dim
-        self.n_classes = n_classes
-        self.s         = s
-        self.m         = m
-
-        # learnable weight matrix; each row is the class prototype
-        self.weight = nn.Parameter(torch.empty(n_classes, in_dim))
-        nn.init.xavier_uniform_(self.weight)
-
-        # pre-compute margin constants
-        self.cos_m = math.cos(m)
-        self.sin_m = math.sin(m)
-        self.th    = math.cos(math.pi - m)   # threshold: cos(π - m)
-        self.mm    = math.sin(math.pi - m) * m
-
-    def forward(
-        self,
-        embeddings: torch.Tensor,
-        labels: torch.Tensor,
-    ) -> torch.Tensor:
-        """
-        Args:
-            embeddings : [B, in_dim]  unit-norm  (output of SpeakerNet)
-            labels     : [B]          integer speaker IDs (0-indexed)
-        Returns:
-            logits     : [B, n_classes]  scaled cosine logits with margin
-        """
-        # normalise weight prototypes
-        w = F.normalize(self.weight, p=2, dim=1)   # [n_classes, in_dim]
-
-        # cosine similarity  [B, n_classes]
-        cosine = F.linear(embeddings, w)
-        cosine = cosine.clamp(-1.0 + 1e-7, 1.0 - 1e-7)
-
-        # sin(θ)  via identity  sin² + cos² = 1
-        sine = torch.sqrt(1.0 - cosine.pow(2))
-
-        # cos(θ + m) = cos θ · cos m − sin θ · sin m
-        phi = cosine * self.cos_m - sine * self.sin_m
-
-        # numerical guard: if cos θ < cos(π - m), use linear approx
-        phi = torch.where(cosine > self.th, phi, cosine - self.mm)
-
-        # apply margin only to the ground-truth class
-        one_hot = torch.zeros_like(cosine)
-        one_hot.scatter_(1, labels.unsqueeze(1), 1.0)
-
-        output = (one_hot * phi) + ((1.0 - one_hot) * cosine)
-        output = output * self.s
-
-        return output
-
-
-# ── Quick smoke test ──────────────────────────────────────────────────────────
-
-if __name__ == "__main__":
-    print("SpeakerNet smoke test …")
-
-    net  = SpeakerNet()
-    head = ArcFaceHead(in_dim=EMBED_DIM, n_classes=200)
-
-    dummy_mel    = torch.randn(8, 1, 64, 97)
-    dummy_labels = torch.randint(0, 200, (8,))
-
-    emb    = net(dummy_mel)
-    logits = head(emb, dummy_labels)
-    loss   = F.cross_entropy(logits, dummy_labels)
-
-    print(f"  Input  : {dummy_mel.shape}")
-    print(f"  Embed  : {emb.shape}   norm={emb.norm(dim=1).mean():.4f} (should be ≈1.0)")
-    print(f"  Logits : {logits.shape}")
-    print(f"  Loss   : {loss.item():.4f}")
-    print("Smoke test PASSED.")
-
-```
-
 ### `training/nsp_receiver.py`
 
 ```python
@@ -11152,355 +10638,6 @@ if __name__ == "__main__":
 
 ```
 
-### `training/train_speaker.py`
-
-```python
-"""
-train_speaker.py
-================
-OSL-IPL-2026-INT-002  |  Track A  |  WA-3
-
-Training pipeline for SpeakerNet with ArcFace metric learning.
-
-Run from repo root:
-    python training/train_speaker.py
-
-Or with overrides:
-    python training/train_speaker.py --epochs 40 --m 0.45 --s 32
-
-Checkpoints saved to:  checkpoints/speaker/
-Best model saved to:   checkpoints/best_speaker_model.pth
-"""
-
-import os
-import sys
-import math
-import time
-import argparse
-import random
-from pathlib import Path
-
-import numpy as np
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.utils.data import DataLoader
-from torch.optim import AdamW
-from torch.optim.lr_scheduler import CosineAnnealingLR
-
-# ── path setup (works from repo root or training/) ───────────────────────────
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "training"))
-
-from dataset_speaker import SpeakerDataset, BalancedBatchSampler
-from model_speaker    import SpeakerNet, ArcFaceHead
-
-
-# ── Defaults ─────────────────────────────────────────────────────────────────
-
-DEFAULTS = dict(
-    train_csv  = "data/speaker_splits/speaker_train.csv",
-    val_csv    = "data/speaker_splits/speaker_val.csv",
-    ckpt_dir   = "checkpoints/speaker",
-    best_path  = "checkpoints/best_speaker_model.pth",
-    backbone   = "checkpoints/best_model.pth",
-    epochs     = 30,
-    M          = 16,    # speakers per batch
-    K          = 4,     # utterances per speaker per batch
-    lr         = 1e-4,
-    wd         = 1e-4,
-    s          = 32.0,  # ArcFace scale
-    m          = 0.50,  # ArcFace margin
-    seed       = 42,
-    num_workers= 2,
-)
-
-
-# ── Reproducibility ───────────────────────────────────────────────────────────
-
-def set_seed(seed: int) -> None:
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
-
-
-# ── EER computation ───────────────────────────────────────────────────────────
-
-def compute_eer(embeddings: np.ndarray, labels: np.ndarray) -> float:
-    """
-    Compute Equal Error Rate on a held-out split.
-
-    Builds all genuine pairs (same speaker) and a random equal-size
-    sample of impostor pairs (different speakers), then finds the
-    threshold where FAR == FRR.
-
-    Args:
-        embeddings : [N, 128] float32  L2-normalised
-        labels     : [N]      int      speaker IDs
-
-    Returns:
-        eer : float  (0.0 – 1.0)
-    """
-    rng = np.random.default_rng(0)
-
-    # ── collect genuine and impostor cosine similarities ─────────────────
-    genuine_scores  = []
-    impostor_scores = []
-
-    speaker_to_idx: dict[int, list[int]] = {}
-    for i, lbl in enumerate(labels):
-        speaker_to_idx.setdefault(int(lbl), []).append(i)
-
-    # genuine pairs: all within-speaker pairs (capped at 2000 per speaker)
-    for sid, idxs in speaker_to_idx.items():
-        if len(idxs) < 2:
-            continue
-        idxs_arr = np.array(idxs)
-        for i in range(len(idxs_arr)):
-            for j in range(i + 1, min(i + 5, len(idxs_arr))):
-                cos_sim = float(
-                    embeddings[idxs_arr[i]] @ embeddings[idxs_arr[j]]
-                )
-                genuine_scores.append(cos_sim)
-
-    if len(genuine_scores) == 0:
-        return 0.5   # no genuine pairs → undefined; return chance
-
-    # impostor pairs: random cross-speaker, same count as genuine
-    n_imp = len(genuine_scores)
-    all_idx = np.arange(len(labels))
-    for _ in range(n_imp):
-        a, b = rng.choice(all_idx, 2, replace=False)
-        while labels[a] == labels[b]:
-            b = rng.choice(all_idx)
-        impostor_scores.append(float(embeddings[a] @ embeddings[b]))
-
-    genuine_arr  = np.array(genuine_scores)
-    impostor_arr = np.array(impostor_scores)
-
-    # ── sweep thresholds ─────────────────────────────────────────────────
-    thresholds = np.linspace(-1.0, 1.0, 400)
-    best_eer   = 1.0
-
-    for t in thresholds:
-        far = np.mean(impostor_arr >= t)   # impostors accepted
-        frr = np.mean(genuine_arr  <  t)   # genuines rejected
-        eer_candidate = abs(far - frr)
-        if eer_candidate < abs(best_eer - (far + frr) / 2):
-            best_eer = (far + frr) / 2
-
-    return float(best_eer)
-
-
-# ── Validation pass ───────────────────────────────────────────────────────────
-
-@torch.no_grad()
-def validate(
-    net    : SpeakerNet,
-    loader : DataLoader,
-    device : torch.device,
-) -> tuple[float, float]:
-    """
-    Extract all val embeddings, compute EER and Rank-1 accuracy.
-
-    Returns:
-        eer    : float  (lower is better)
-        rank1  : float  fraction correct nearest-neighbour (higher is better)
-    """
-    net.eval()
-    all_emb  = []
-    all_lbl  = []
-
-    for mels, sids, _ in loader:
-        mels = mels.to(device)
-        emb  = net(mels)
-        all_emb.append(emb.cpu().numpy())
-        all_lbl.append(sids.numpy())
-
-    embeddings = np.concatenate(all_emb, axis=0)   # [N, 128]
-    labels     = np.concatenate(all_lbl, axis=0)   # [N]
-
-    eer = compute_eer(embeddings, labels)
-
-    # ── Rank-1: for each sample find nearest neighbour (excl. self) ───────
-    # cosine similarity matrix via dot product (embeddings are unit-norm)
-    sim = embeddings @ embeddings.T     # [N, N]
-    np.fill_diagonal(sim, -2.0)        # exclude self
-    nn_pred = np.argmax(sim, axis=1)   # [N]
-    rank1   = float(np.mean(labels[nn_pred] == labels))
-
-    return eer, rank1
-
-
-# ── Training loop ─────────────────────────────────────────────────────────────
-
-def train(args: argparse.Namespace) -> None:
-    set_seed(args.seed)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"[train_speaker] Device: {device}")
-
-    # ── datasets ──────────────────────────────────────────────────────────
-    train_csv = ROOT / args.train_csv
-    val_csv   = ROOT / args.val_csv
-
-    train_ds = SpeakerDataset(train_csv, augment=True)
-    val_ds   = SpeakerDataset(val_csv,   augment=False)
-
-    n_speakers = train_ds.n_speakers
-    print(f"[train_speaker] Training speakers : {n_speakers}")
-    print(f"[train_speaker] Val     speakers  : {val_ds.n_speakers}")
-
-    train_sampler = BalancedBatchSampler(
-        train_ds, M=args.M, K=args.K, seed=args.seed
-    )
-    # val loader uses a flat sampler — all val embeddings extracted once
-    val_loader = DataLoader(
-        val_ds,
-        batch_size=64,
-        shuffle=False,
-        num_workers=args.num_workers,
-        pin_memory=device.type == "cuda",
-    )
-    train_loader = DataLoader(
-        train_ds,
-        batch_sampler=train_sampler,
-        num_workers=args.num_workers,
-        pin_memory=device.type == "cuda",
-    )
-
-    # ── model ─────────────────────────────────────────────────────────────
-    net  = SpeakerNet().to(device)
-    head = ArcFaceHead(
-        in_dim=128,
-        n_classes=n_speakers,
-        s=args.s,
-        m=args.m,
-    ).to(device)
-
-    backbone_path = ROOT / args.backbone
-    if backbone_path.exists():
-        net.load_backbone(backbone_path)
-    else:
-        print(f"[WARN] Backbone checkpoint not found at {backbone_path}. Training from scratch.")
-
-    # ── optimiser ─────────────────────────────────────────────────────────
-    # train backbone + projection + arcface head jointly
-    params = list(net.parameters()) + list(head.parameters())
-    opt    = AdamW(params, lr=args.lr, weight_decay=args.wd)
-    sched  = CosineAnnealingLR(opt, T_max=args.epochs, eta_min=1e-6)
-
-    # ── checkpoint dir ────────────────────────────────────────────────────
-    ckpt_dir  = ROOT / args.ckpt_dir
-    best_path = ROOT / args.best_path
-    ckpt_dir.mkdir(parents=True, exist_ok=True)
-    best_path.parent.mkdir(parents=True, exist_ok=True)
-
-    best_eer   = 1.0
-    best_rank1 = 0.0
-
-    print()
-    print(f"{'Epoch':>5}  {'Train Loss':>10}  {'EER':>7}  {'Rank-1':>7}  {'LR':>8}  {'Time':>6}")
-    print("-" * 55)
-
-    for epoch in range(1, args.epochs + 1):
-        net.train()
-        head.train()
-        t0 = time.time()
-        epoch_loss = 0.0
-        n_batches  = 0
-
-        for mels, sids, _ in train_loader:
-            mels = mels.to(device)
-            sids = sids.to(device)
-
-            opt.zero_grad(set_to_none=True)
-
-            emb    = net(mels)              # [B, 128] unit-norm
-            logits = head(emb, sids)        # [B, n_speakers]
-            loss   = F.cross_entropy(logits, sids)
-
-            loss.backward()
-            # gradient clip — stabilises early training
-            nn.utils.clip_grad_norm_(params, max_norm=10.0)
-            opt.step()
-
-            epoch_loss += loss.item()
-            n_batches  += 1
-
-        sched.step()
-        avg_loss = epoch_loss / max(n_batches, 1)
-        elapsed  = time.time() - t0
-
-        # ── validation every epoch ────────────────────────────────────────
-        eer, rank1 = validate(net, val_loader, device)
-        lr_now = sched.get_last_lr()[0]
-
-        print(
-            f"{epoch:>5}  {avg_loss:>10.4f}  {eer:>7.4f}  {rank1:>7.4f}"
-            f"  {lr_now:>8.2e}  {elapsed:>5.1f}s"
-        )
-
-        # ── save checkpoint every 5 epochs ───────────────────────────────
-        if epoch % 5 == 0:
-            ckpt = {
-                "epoch"      : epoch,
-                "net_state"  : net.state_dict(),
-                "head_state" : head.state_dict(),
-                "opt_state"  : opt.state_dict(),
-                "eer"        : eer,
-                "rank1"      : rank1,
-                "args"       : vars(args),
-            }
-            torch.save(ckpt, ckpt_dir / f"speaker_epoch_{epoch:03d}.pth")
-
-        # ── save best model (by EER, tie-break by rank1) ─────────────────
-        if eer < best_eer or (eer == best_eer and rank1 > best_rank1):
-            best_eer   = eer
-            best_rank1 = rank1
-            torch.save(
-                {
-                    "epoch"     : epoch,
-                    "net_state" : net.state_dict(),
-                    "eer"       : eer,
-                    "rank1"     : rank1,
-                    "n_speakers": n_speakers,
-                    "embed_dim" : 128,
-                    "args"      : vars(args),
-                },
-                best_path,
-            )
-
-    # ── final summary ─────────────────────────────────────────────────────
-    print()
-    print("=" * 55)
-    print(f"  Training complete.")
-    print(f"  Best EER    : {best_eer:.4f}  (target ≤ 0.15)")
-    print(f"  Best Rank-1 : {best_rank1:.4f}  (target ≥ 0.80)")
-    print(f"  Best model  : {best_path}")
-    print("=" * 55)
-
-    # exit code 1 if below SOW exit criteria (useful in CI)
-    if best_eer > 0.15 or best_rank1 < 0.80:
-        print("[WARN] SOW exit criteria not met. Consider more epochs or lower margin.")
-
-
-# ── CLI ───────────────────────────────────────────────────────────────────────
-
-def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Train SpeakerNet (WA-3)")
-    for key, val in DEFAULTS.items():
-        t = type(val) if val is not None else str
-        p.add_argument(f"--{key}", type=t, default=val)
-    return p.parse_args()
-
-
-if __name__ == "__main__":
-    train(parse_args())
-
-```
-
 ### `training/verify_gv10_matlab.m`
 
 ```matlab
@@ -12722,6 +11859,272 @@ Confusion Matrix (rows=true, cols=pred):
 ---
 ## Notebooks (input cells only)
 
+### `fingerprinting.ipynb`
+
+```python
+# [code cell]
+# Cell A — Install SpeechBrain and download ECAPA-TDNN
+!pip install -q speechbrain
+
+from speechbrain.inference.classifiers import EncoderClassifier
+
+ecapa = EncoderClassifier.from_hparams(
+    source="speechbrain/spkrec-ecapa-voxceleb",
+    run_opts={"device": "cpu"}
+)
+print("ECAPA-TDNN loaded on CPU.")
+
+# [code cell]
+# Cell 1 — Mount Google Drive
+from google.colab import drive
+import os
+
+if not os.path.exists('/content/drive/MyDrive'):
+    drive.mount('/content/drive')
+    print('Drive mounted.')
+else:
+    print('Drive already mounted.')
+
+# [code cell]
+# Cell 2 — Clone repo / pull latest
+import os
+
+REPO_URL   = 'https://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@github.com/bodasingiksheeraja317-svg/STREAMSENSE.git'
+REPO_DIR   = '/content/STREAMSENSE'
+DRIVE_CKPT = '/content/drive/MyDrive/STREAMSENSE_checkpoints'
+DRIVE_OUT  = '/content/drive/MyDrive/STREAMSENSE_outputs'
+
+if os.path.isdir(REPO_DIR):
+    %cd {REPO_DIR}
+    !git pull
+else:
+    !git clone {REPO_URL} {REPO_DIR}
+    %cd {REPO_DIR}
+
+os.makedirs(DRIVE_CKPT, exist_ok=True)
+os.makedirs(DRIVE_OUT,  exist_ok=True)
+print('Repo ready at', REPO_DIR)
+
+# [code cell]
+# Cell 3 — Install dependencies
+!pip install -q hnswlib
+!pip install -q speechbrain
+print('Dependencies installed.')
+
+# [code cell]
+# Cell 4 — Extract data_raw.zip (skip if already done)
+import os
+
+RAW_DIR  = '/content/STREAMSENSE/data/raw'
+ZIP_PATH = '/content/drive/MyDrive/data_raw.zip'
+
+if os.path.isdir(RAW_DIR) and len(os.listdir(RAW_DIR)) > 0:
+    print(f'data/raw/ already populated ({len(os.listdir(RAW_DIR))} class dirs). Skipping.')
+else:
+    print('Extracting data_raw.zip ...')
+    os.makedirs('/content/STREAMSENSE/data', exist_ok=True)
+    !unzip -q {ZIP_PATH} -d /content/STREAMSENSE/data/
+    print('Done. Classes found:', os.listdir(RAW_DIR))
+
+# [code cell]
+# Cell 5 — Fix CSV paths for Colab
+import pandas as pd, os
+
+SPLITS_DIR = '/content/STREAMSENSE/data/speaker_splits'
+COLAB_RAW  = '/content/STREAMSENSE/data/raw'
+
+def fix_paths(csv_path):
+    df = pd.read_csv(csv_path)
+    def remap(fp):
+        parts = fp.replace('\\', '/').split('/')
+        return os.path.join(COLAB_RAW, parts[-2], parts[-1])
+    df['filepath'] = df['filepath'].apply(remap)
+    df.to_csv(csv_path, index=False)
+
+for split in ['train', 'val', 'test']:
+    path = f'{SPLITS_DIR}/speaker_{split}.csv'
+    fix_paths(path)
+    print(f'  Paths fixed in {split}.csv')
+
+# Sanity check
+df0   = pd.read_csv(f'{SPLITS_DIR}/speaker_test.csv')
+first = df0['filepath'].iloc[0]
+print(f'\nSample path: {first}')
+print(f'File exists : {os.path.exists(first)}')
+
+# [code cell]
+# Cell B — Debug first file
+import pandas as pd
+import numpy as np
+import torch
+import torchaudio
+import os
+
+SPLITS_DIR = '/content/STREAMSENSE/data/speaker_splits'
+test_df    = pd.read_csv(f'{SPLITS_DIR}/speaker_test.csv')
+
+print(f"Test set: {len(test_df)} utterances, {test_df['speaker_id'].nunique()} speakers")
+
+# Debug first file
+first_wav = test_df['filepath'].iloc[0]
+print(f"\nTesting first file: {first_wav}")
+print(f"File exists: {os.path.exists(first_wav)}")
+
+wav, sr = torchaudio.load(first_wav)
+print(f"Loaded wav: shape={wav.shape}, sr={sr}")
+
+if sr != 16000:
+    wav = torchaudio.functional.resample(wav, sr, 16000)
+    print(f"Resampled to 16000")
+
+emb = ecapa.encode_batch(wav)
+print(f"Embedding shape: {emb.shape}")
+print("First file SUCCESS ✓")
+
+# [code cell]
+# Cell B — Extract ECAPA embeddings for all test utterances (fixed)
+import pandas as pd
+import numpy as np
+import torch
+import torchaudio
+import os
+
+SPLITS_DIR = '/content/STREAMSENSE/data/speaker_splits'
+test_df    = pd.read_csv(f'{SPLITS_DIR}/speaker_test.csv').reset_index(drop=True)
+
+print(f"Test set: {len(test_df)} utterances, {test_df['speaker_id'].nunique()} speakers")
+print("Extracting embeddings... (CPU — ~20-30 mins)")
+
+all_emb = []
+all_lbl = []
+
+ecapa.eval()
+with torch.no_grad():
+    for i in range(len(test_df)):
+        row = test_df.iloc[i]
+        wav, sr = torchaudio.load(row['filepath'])
+        if sr != 16000:
+            wav = torchaudio.functional.resample(wav, sr, 16000)
+        emb = ecapa.encode_batch(wav)          # [1, 1, 192]
+        all_emb.append(emb.squeeze().numpy())  # [192]
+        all_lbl.append(int(row['speaker_id']))
+
+        if (i + 1) % 200 == 0:
+            print(f"  {i+1}/{len(test_df)} done...")
+
+embeddings = np.array(all_emb, dtype='float32')  # [3394, 192]
+labels     = np.array(all_lbl, dtype=int)         # [3394]
+
+print(f"\nDone. Embeddings: {embeddings.shape}")
+
+np.save(f'{SPLITS_DIR}/ecapa_embeddings_test.npy', embeddings)
+np.save(f'{SPLITS_DIR}/ecapa_labels_test.npy',     labels)
+print("Saved to disk.")
+
+# [code cell]
+# Cell C — Build HNSW index, compute EER and Rank-1
+import numpy as np
+import hnswlib
+import json
+
+SPLITS_DIR = '/content/STREAMSENSE/data/speaker_splits'
+INDEX_PATH = '/content/STREAMSENSE/ecapa_fingerprint_index.bin'
+META_PATH  = '/content/STREAMSENSE/ecapa_fingerprint_metadata.json'
+
+embeddings = np.load(f'{SPLITS_DIR}/ecapa_embeddings_test.npy')
+labels     = np.load(f'{SPLITS_DIR}/ecapa_labels_test.npy')
+
+# ── L2-normalise for cosine similarity via dot product ────────────────────
+norms      = np.linalg.norm(embeddings, axis=1, keepdims=True)
+embeddings = embeddings / (norms + 1e-8)
+
+# ── Build HNSW index ──────────────────────────────────────────────────────
+DIM   = embeddings.shape[1]   # 192
+index = hnswlib.Index(space='cosine', dim=DIM)
+index.init_index(max_elements=len(embeddings), ef_construction=200, M=16)
+index.set_ef(50)
+index.add_items(embeddings, np.arange(len(embeddings)))
+index.save_index(INDEX_PATH)
+print(f"HNSW index saved: {len(embeddings)} vectors, dim={DIM}")
+
+# ── Metadata ──────────────────────────────────────────────────────────────
+meta = {
+    'model'       : 'ECAPA-TDNN (speechbrain/spkrec-ecapa-voxceleb)',
+    'embed_dim'   : DIM,
+    'n_vectors'   : len(embeddings),
+    'hnsw_space'  : 'cosine',
+    'hnsw_M'      : 16,
+    'hnsw_ef'     : 50,
+    'dataset'     : 'Google Speech Commands v2 — test split',
+    'n_speakers'  : int(len(set(labels.tolist()))),
+}
+with open(META_PATH, 'w') as f:
+    json.dump(meta, f, indent=2)
+
+# ── Rank-1 ────────────────────────────────────────────────────────────────
+print("\nComputing Rank-1...")
+sim = embeddings @ embeddings.T     # [N, N] cosine similarity
+np.fill_diagonal(sim, -2.0)         # exclude self
+nn_pred = np.argmax(sim, axis=1)
+rank1   = float(np.mean(labels[nn_pred] == labels))
+
+# ── EER ───────────────────────────────────────────────────────────────────
+print("Computing EER...")
+rng = np.random.default_rng(0)
+genuine_scores, impostor_scores = [], []
+
+speaker_to_idx = {}
+for i, lbl in enumerate(labels):
+    speaker_to_idx.setdefault(int(lbl), []).append(i)
+
+for sid, idxs in speaker_to_idx.items():
+    if len(idxs) < 2:
+        continue
+    for i in range(len(idxs)):
+        for j in range(i+1, min(i+5, len(idxs))):
+            genuine_scores.append(float(embeddings[idxs[i]] @ embeddings[idxs[j]]))
+
+n_imp = len(genuine_scores)
+all_idx = np.arange(len(labels))
+for _ in range(n_imp):
+    a, b = rng.choice(all_idx, 2, replace=False)
+    while labels[a] == labels[b]:
+        b = rng.choice(all_idx)
+    impostor_scores.append(float(embeddings[a] @ embeddings[b]))
+
+genuine_arr  = np.array(genuine_scores)
+impostor_arr = np.array(impostor_scores)
+
+best_eer = 1.0
+for t in np.linspace(-1.0, 1.0, 400):
+    far = np.mean(impostor_arr >= t)
+    frr = np.mean(genuine_arr  <  t)
+    candidate = (far + frr) / 2
+    if abs(far - frr) < abs(best_eer - 0.5) + 0.01:
+        best_eer = candidate
+
+# ── Results ───────────────────────────────────────────────────────────────
+print()
+print("=" * 50)
+print("  ECAPA-TDNN FINGERPRINTING RESULTS (GSC test)")
+print("=" * 50)
+print(f"  Speakers  : {len(speaker_to_idx)}")
+print(f"  Utterances: {len(embeddings)}")
+print(f"  EER       : {best_eer:.4f}  (your model: 0.2766)")
+print(f"  Rank-1    : {rank1:.4f}  (your model: 0.5263)")
+print("=" * 50)
+
+# [code cell]
+# Save HNSW index and metadata to Drive
+import shutil
+DRIVE_OUT = '/content/drive/MyDrive/STREAMSENSE_outputs'
+
+shutil.copy('/content/STREAMSENSE/ecapa_fingerprint_index.bin',      f'{DRIVE_OUT}/ecapa_fingerprint_index.bin')
+shutil.copy('/content/STREAMSENSE/ecapa_fingerprint_metadata.json',  f'{DRIVE_OUT}/ecapa_fingerprint_metadata.json')
+print("Saved to Drive.")
+
+```
+
 ### `qat_colab.ipynb`
 
 ```python
@@ -13681,6 +13084,482 @@ for idx in order:
     bar   = '█' * int(score * 30)
     marker = ' ← predicted' if idx == order[0] else ''
     print(f'{label:<10} {score:.4f}    {bar}{marker}')
+
+```
+
+### `SpeakerNet_Train.ipynb`
+
+```python
+# [markdown]
+# # SpeakerNet Training — WA-3 Speaker Fingerprinting
+# **OSL-IPL-2026-INT-002 | Track A | STREAMSENSE**
+# 
+# Trains a SpeakerNet model using ArcFace metric learning so that embeddings cluster by **speaker identity** (not word class).  
+# Produces `best_speaker_model.pth` → loaded into the multi-head wrapper for D-A4 fingerprint matching.
+# 
+# **Run order:**  
+# 1. Cell 1 — Mount Drive  
+# 2. Cell 2 — Clone / pull repo  
+# 3. Cell 3 — Install deps  
+# 4. Cell 4 — Extract data_raw.zip (skip if already done)  
+# 5. Cell 5 — Build speaker manifests (`build_speaker_dataset.py`)  
+# 6. Cell 6 — Verify manifests  
+# 7. Cell 7 — Fix CSV paths for Colab  
+# 8. Cell 8 — Dataset smoke-test  
+# 9. Cell 9 — Model smoke-test  
+# 10. Cell 10 — Train  
+# 11. Cell 11 — Validate best checkpoint (EER + Rank-1)  
+# 12. Cell 12 — Extract embeddings + build HNSW index  
+# 13. Cell 13 — t-SNE visualisation  
+# 14. Cell 14 — Backup to Drive + push to GitHub
+
+# [code cell]
+# Cell 1 — Mount Google Drive
+from google.colab import drive
+drive.mount('/content/drive')
+print('Drive mounted.')
+
+# [code cell]
+# Cell 2 — Clone repo / pull latest
+import os
+
+REPO_URL   = 'https://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@github.com/bodasingiksheeraja317-svg/STREAMSENSE.git'
+REPO_DIR   = '/content/STREAMSENSE'
+DRIVE_CKPT = '/content/drive/MyDrive/STREAMSENSE_checkpoints'
+DRIVE_OUT  = '/content/drive/MyDrive/STREAMSENSE_outputs'
+
+if os.path.isdir(REPO_DIR):
+    %cd {REPO_DIR}
+    !git pull
+else:
+    !git clone {REPO_URL} {REPO_DIR}
+    %cd {REPO_DIR}
+
+os.makedirs(DRIVE_CKPT, exist_ok=True)
+os.makedirs(DRIVE_OUT,  exist_ok=True)
+print('Repo ready at', REPO_DIR)
+
+# [code cell]
+# Cell 3 — Install dependencies
+!pip install -q hnswlib
+!pip install -q pytorch-metric-learning
+!pip install -q umap-learn
+print('Dependencies installed.')
+
+# [code cell]
+# Cell 4 — Extract data_raw.zip (skip if data/raw/ already exists)
+import os
+
+RAW_DIR  = '/content/STREAMSENSE/data/raw'
+ZIP_PATH = '/content/drive/MyDrive/data_raw.zip'
+
+if os.path.isdir(RAW_DIR) and len(os.listdir(RAW_DIR)) > 0:
+    print(f'data/raw/ already populated ({len(os.listdir(RAW_DIR))} class dirs). Skipping extraction.')
+else:
+    print('Extracting data_raw.zip …')
+    os.makedirs('/content/STREAMSENSE/data', exist_ok=True)
+    !unzip -q {ZIP_PATH} -d /content/STREAMSENSE/data/
+    print('Done. Classes found:', os.listdir(RAW_DIR))
+
+# [code cell]
+# Cell 5 — Build speaker manifests
+# Runs build_speaker_dataset.py to produce:
+#   data/speaker_splits/speaker_train.csv
+#   data/speaker_splits/speaker_val.csv
+#   data/speaker_splits/speaker_test.csv
+#
+# Safe to re-run — output is deterministic (fixed seed=42).
+
+import os
+SPLITS_DIR = '/content/STREAMSENSE/data/speaker_splits'
+
+if all(os.path.exists(f'{SPLITS_DIR}/speaker_{s}.csv') for s in ['train', 'val', 'test']):
+    print('Manifests already exist. Skipping rebuild. Delete data/speaker_splits/ to force.')
+else:
+    !python /content/STREAMSENSE/training/build_speaker_dataset.py \
+        --root /content/STREAMSENSE
+
+# [code cell]
+# Cell 6 — Verify manifests
+import pandas as pd
+
+SPLITS_DIR = '/content/STREAMSENSE/data/speaker_splits'
+
+for split in ['train', 'val', 'test']:
+    path = f'{SPLITS_DIR}/speaker_{split}.csv'
+    df   = pd.read_csv(path)
+    n_speakers   = df['speaker_id'].nunique()
+    n_utterances = len(df)
+    print(f'  {split:5s}  →  {n_speakers:4d} speakers  |  {n_utterances:6d} utterances')
+
+print('\nSample rows (train):')
+print(pd.read_csv(f'{SPLITS_DIR}/speaker_train.csv').head(3).to_string(index=False))
+
+# [code cell]
+# Cell 7 — Fix CSV paths for Colab
+# The CSVs contain absolute paths from the machine that built them.
+# This cell rewrites them to the Colab-local path.
+
+import pandas as pd, os
+
+SPLITS_DIR = '/content/STREAMSENSE/data/speaker_splits'
+COLAB_RAW  = '/content/STREAMSENSE/data/raw'
+
+def fix_paths(csv_path):
+    df = pd.read_csv(csv_path)
+    # Extract class/filename from wherever the path came from
+    def remap(fp):
+        parts = fp.replace('\\', '/').split('/')
+        # last two parts are  <class>/<filename>.wav
+        return os.path.join(COLAB_RAW, parts[-2], parts[-1])
+    df['filepath'] = df['filepath'].apply(remap)
+    df.to_csv(csv_path, index=False)
+
+for split in ['train', 'val', 'test']:
+    path = f'{SPLITS_DIR}/speaker_{split}.csv'
+    fix_paths(path)
+    print(f'  Paths fixed in {split}.csv')
+
+# Quick sanity check — first file should exist
+df0   = pd.read_csv(f'{SPLITS_DIR}/speaker_train.csv')
+first = df0['filepath'].iloc[0]
+exists = os.path.exists(first)
+print(f'\nSample path: {first}')
+print(f'File exists : {exists}  {"✓" if exists else "✗ — check data/raw/ extraction"}')
+
+# [code cell]
+# Cell 8 — Dataset smoke-test
+import sys
+sys.path.insert(0, '/content/STREAMSENSE/training')
+
+from dataset_speaker import SpeakerDataset, BalancedBatchSampler
+from torch.utils.data import DataLoader
+
+SPLITS_DIR = '/content/STREAMSENSE/data/speaker_splits'
+
+ds      = SpeakerDataset(f'{SPLITS_DIR}/speaker_train.csv', augment=False)
+sampler = BalancedBatchSampler(ds, M=4, K=2)   # small M/K for smoke test
+loader  = DataLoader(ds, batch_sampler=sampler, num_workers=2)
+
+mel, sid, cls = next(iter(loader))
+print(f'Batch mel shape : {mel.shape}   (expected [8, 1, 64, 97])')
+print(f'Speaker IDs     : {sid.tolist()}')
+print(f'Class labels    : {cls.tolist()}')
+print('Dataset smoke-test PASSED ✓')
+
+# [code cell]
+# Cell 9 — Model smoke-test
+import sys, torch, torch.nn.functional as F
+sys.path.insert(0, '/content/STREAMSENSE/training')
+
+from model_speaker import SpeakerNet, ArcFaceHead
+
+net  = SpeakerNet()
+head = ArcFaceHead(in_dim=128, n_classes=50)
+
+dummy_mel    = torch.randn(8, 1, 64, 97)
+dummy_labels = torch.randint(0, 50, (8,))
+
+emb    = net(dummy_mel)
+logits = head(emb, dummy_labels)
+loss   = F.cross_entropy(logits, dummy_labels)
+
+norms = emb.norm(dim=1)
+print(f'Embedding shape : {emb.shape}')
+print(f'Embedding norms : min={norms.min():.4f}  max={norms.max():.4f}  (should be ≈1.0)')
+print(f'Logits shape    : {logits.shape}')
+print(f'Loss            : {loss.item():.4f}')
+print('Model smoke-test PASSED ✓')
+
+# [code cell]
+import shutil, glob
+from pathlib import Path
+
+drive_ckpt = '/content/drive/MyDrive/STREAMSENSE_checkpoints'
+
+# backup best
+shutil.copy('/content/STREAMSENSE/checkpoints/best_speaker_model.pth',
+            f'{drive_ckpt}/best_speaker_model.pth')
+
+# backup periodic epochs
+for f in glob.glob('/content/STREAMSENSE/checkpoints/speaker/*.pth'):
+    shutil.copy(f, f'{drive_ckpt}/{Path(f).name}')
+
+print("Backed up to Drive.")
+
+# [code cell]
+# Cell 10 — Train SpeakerNet
+# Runtime: ~40-50 min on T4 for 30 epochs.
+# Checkpoints saved every 5 epochs to checkpoints/speaker/
+# Best model (lowest EER) saved to checkpoints/best_speaker_model.pth
+
+!python /content/STREAMSENSE/training/train_speaker.py \
+    --train_csv     data/speaker_splits/speaker_train.csv \
+    --val_csv       data/speaker_splits/speaker_val.csv \
+    --ckpt_dir      checkpoints/speaker \
+    --best_path     checkpoints/best_speaker_model.pth \
+    --backbone      checkpoints/best_model.pth \
+    --epochs        50 \
+    --M             16 \
+    --K             4 \
+    --lr            1e-4 \
+    --wd            1e-4 \
+    --s             32.0 \
+    --m             0.15 \
+    --num_workers   2 \
+    --seed          42
+
+    # immediately after the training command
+import shutil, glob
+from pathlib import Path
+drive_ckpt = '/content/drive/MyDrive/STREAMSENSE_checkpoints'
+shutil.copy('/content/STREAMSENSE/checkpoints/best_speaker_model.pth',
+            f'{drive_ckpt}/best_speaker_model.pth')
+for f in glob.glob('/content/STREAMSENSE/checkpoints/speaker/*.pth'):
+    shutil.copy(f, f'{drive_ckpt}/{Path(f).name}')
+print("Checkpoints backed up to Drive.")
+
+# [code cell]
+import shutil, glob
+from pathlib import Path
+
+drive_ckpt = '/content/drive/MyDrive/STREAMSENSE_checkpoints'
+
+# Save current best with a clear name so it's not overwritten later
+shutil.copy(
+    '/content/STREAMSENSE/checkpoints/best_speaker_model.pth',
+    f'{drive_ckpt}/best_speaker_model_GSC_EER0277_Rank1_0526.pth'
+)
+
+# Save all periodic checkpoints too
+for f in glob.glob('/content/STREAMSENSE/checkpoints/speaker/*.pth'):
+    shutil.copy(f, f'{drive_ckpt}/{Path(f).name}')
+
+print("All checkpoints safely backed up to Drive.")
+
+# [code cell]
+# Cell 11 — Validate best checkpoint on TEST set
+import sys, torch, numpy as np
+sys.path.insert(0, '/content/STREAMSENSE/training')
+
+from model_speaker   import SpeakerNet
+from dataset_speaker import SpeakerDataset
+from torch.utils.data import DataLoader
+from train_speaker   import compute_eer
+
+BEST_PATH  = '/content/STREAMSENSE/checkpoints/best_speaker_model.pth'
+SPLITS_DIR = '/content/STREAMSENSE/data/speaker_splits'
+device     = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+# Load model
+ckpt = torch.load(BEST_PATH, map_location=device)
+net  = SpeakerNet().to(device)
+net.load_state_dict(ckpt['net_state'])
+net.eval()
+print(f'Loaded checkpoint from epoch {ckpt["epoch"]}  |  val EER={ckpt["eer"]:.4f}  Rank-1={ckpt["rank1"]:.4f}')
+
+# Test set evaluation
+test_ds     = SpeakerDataset(f'{SPLITS_DIR}/speaker_test.csv', augment=False)
+test_loader = DataLoader(test_ds, batch_size=64, shuffle=False, num_workers=2)
+
+all_emb, all_lbl = [], []
+with torch.no_grad():
+    for mels, sids, _ in test_loader:
+        emb = net(mels.to(device))
+        all_emb.append(emb.cpu().numpy())
+        all_lbl.append(sids.numpy())
+
+embeddings = np.concatenate(all_emb)   # [N, 128]
+labels     = np.concatenate(all_lbl)   # [N]
+
+eer = compute_eer(embeddings, labels)
+
+# Rank-1
+sim   = embeddings @ embeddings.T
+np.fill_diagonal(sim, -2.0)
+rank1 = float(np.mean(labels[np.argmax(sim, axis=1)] == labels))
+
+print(f'\n=== TEST SET RESULTS ===')
+print(f'  EER    : {eer:.4f}   (SOW target ≤ 0.15)')
+print(f'  Rank-1 : {rank1:.4f}  (SOW target ≥ 0.80)')
+ok_eer   = '✓' if eer   <= 0.15 else '✗'
+ok_rank1 = '✓' if rank1 >= 0.80 else '✗'
+print(f'  EER gate    {ok_eer}   Rank-1 gate {ok_rank1}')
+
+# [code cell]
+# Cell 12 — Extract reference embeddings + build HNSW fingerprint index
+# Uses the TEST set as the gallery (all utterances from test speakers).
+# Outputs:
+#   data/speaker_splits/embeddings_reference.npy   [N, 128]
+#   data/speaker_splits/speaker_ids_reference.npy  [N]
+#   fingerprint_index.bin    (HNSW index)
+#   fingerprint_metadata.json
+
+import sys, torch, numpy as np, json, os
+sys.path.insert(0, '/content/STREAMSENSE/training')
+import hnswlib
+
+from model_speaker   import SpeakerNet
+from dataset_speaker import SpeakerDataset
+from torch.utils.data import DataLoader
+
+BEST_PATH  = '/content/STREAMSENSE/checkpoints/best_speaker_model.pth'
+SPLITS_DIR = '/content/STREAMSENSE/data/speaker_splits'
+INDEX_PATH = '/content/STREAMSENSE/fingerprint_index.bin'
+META_PATH  = '/content/STREAMSENSE/fingerprint_metadata.json'
+device     = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+# ── Load model ────────────────────────────────────────────────────────────────
+ckpt = torch.load(BEST_PATH, map_location=device)
+net  = SpeakerNet().to(device)
+net.load_state_dict(ckpt['net_state'])
+net.eval()
+
+# ── Extract embeddings from TEST set (reference gallery) ──────────────────────
+test_ds     = SpeakerDataset(f'{SPLITS_DIR}/speaker_test.csv', augment=False)
+test_loader = DataLoader(test_ds, batch_size=64, shuffle=False, num_workers=2)
+
+all_emb, all_lbl, all_fp = [], [], []
+with torch.no_grad():
+    for mels, sids, _ in test_loader:
+        emb = net(mels.to(device))
+        all_emb.append(emb.cpu().numpy())
+        all_lbl.append(sids.numpy())
+
+# filepath list from dataset records
+for fp, sid, cls in test_ds.records:
+    all_fp.append(fp)
+
+embeddings = np.concatenate(all_emb).astype('float32')  # [N, 128]
+labels     = np.concatenate(all_lbl).astype(int)
+
+np.save(f'{SPLITS_DIR}/embeddings_reference.npy', embeddings)
+np.save(f'{SPLITS_DIR}/speaker_ids_reference.npy', labels)
+print(f'Reference embeddings saved: {embeddings.shape}')
+
+# ── Build HNSW index ──────────────────────────────────────────────────────────
+# Decision Record: HNSW chosen over KD-tree (D=128 → KD-tree degrades to O(n));
+# cosine space (embeddings are L2-normalised → cosine = dot product).
+DIM = 128
+index = hnswlib.Index(space='cosine', dim=DIM)
+index.init_index(
+    max_elements   = len(embeddings),
+    ef_construction= 200,
+    M              = 16,
+)
+index.set_ef(50)  # query-time accuracy
+index.add_items(embeddings, np.arange(len(embeddings)))
+index.save_index(INDEX_PATH)
+print(f'HNSW index saved: {INDEX_PATH}  ({len(embeddings)} vectors)')
+
+# ── Metadata ──────────────────────────────────────────────────────────────────
+metadata = {
+    'index_size'   : len(embeddings),
+    'embed_dim'    : DIM,
+    'hnsw_space'   : 'cosine',
+    'hnsw_M'       : 16,
+    'hnsw_ef'      : 50,
+    'records'      : [
+        {'idx': int(i), 'speaker_id': int(labels[i]), 'filepath': all_fp[i]}
+        for i in range(len(embeddings))
+    ]
+}
+with open(META_PATH, 'w') as f:
+    json.dump(metadata, f, indent=2)
+print(f'Metadata saved : {META_PATH}')
+
+# ── Quick query test ──────────────────────────────────────────────────────────
+query   = embeddings[0:1]   # query with the first embedding
+labels_q, dists = index.knn_query(query, k=5)
+print(f'\nTest query — top-5 neighbours:')
+for rank, (idx, dist) in enumerate(zip(labels_q[0], dists[0])):
+    spk = labels[idx]
+    print(f'  Rank {rank+1}: index_pos={idx}  speaker_id={spk}  cosine_dist={dist:.4f}')
+print('\nHNSW index build COMPLETE ✓')
+
+# [code cell]
+# Cell 13 — t-SNE visualisation of test embeddings
+import numpy as np, matplotlib.pyplot as plt
+from sklearn.manifold import TSNE
+
+SPLITS_DIR = '/content/STREAMSENSE/data/speaker_splits'
+
+embeddings = np.load(f'{SPLITS_DIR}/embeddings_reference.npy')
+labels     = np.load(f'{SPLITS_DIR}/speaker_ids_reference.npy')
+
+# Subsample for speed (t-SNE is O(n^2))
+MAX_PLOT = 2000
+if len(embeddings) > MAX_PLOT:
+    idx        = np.random.choice(len(embeddings), MAX_PLOT, replace=False)
+    embeddings = embeddings[idx]
+    labels     = labels[idx]
+
+print(f'Running t-SNE on {len(embeddings)} embeddings …')
+tsne  = TSNE(n_components=2, random_state=42, perplexity=30, n_iter=1000)
+proj  = tsne.fit_transform(embeddings)
+
+# Colour by speaker_id (top-20 speakers for clarity)
+top_speakers = np.argsort(np.bincount(labels))[::-1][:20]
+mask         = np.isin(labels, top_speakers)
+
+fig, ax = plt.subplots(figsize=(10, 8))
+scatter = ax.scatter(
+    proj[mask, 0], proj[mask, 1],
+    c=labels[mask], cmap='tab20', s=8, alpha=0.7
+)
+ax.scatter(
+    proj[~mask, 0], proj[~mask, 1],
+    c='lightgray', s=4, alpha=0.3, label='other speakers'
+)
+ax.set_title('SpeakerNet embeddings — t-SNE (top 20 speakers coloured)')
+ax.set_xlabel('t-SNE 1')
+ax.set_ylabel('t-SNE 2')
+plt.tight_layout()
+plt.savefig('/content/STREAMSENSE/tsne_speaker_embeddings.png', dpi=150)
+plt.show()
+print('t-SNE plot saved.')
+
+# [code cell]
+# Cell 14 — Backup to Drive + push to GitHub
+import shutil, os
+
+REPO_DIR   = '/content/STREAMSENSE'
+DRIVE_CKPT = '/content/drive/MyDrive/STREAMSENSE_checkpoints'
+DRIVE_OUT  = '/content/drive/MyDrive/STREAMSENSE_outputs'
+
+# ── Copy key artifacts to Drive ───────────────────────────────────────────────
+to_backup = [
+    (f'{REPO_DIR}/checkpoints/best_speaker_model.pth', DRIVE_CKPT),
+    (f'{REPO_DIR}/fingerprint_index.bin',              DRIVE_OUT),
+    (f'{REPO_DIR}/fingerprint_metadata.json',          DRIVE_OUT),
+    (f'{REPO_DIR}/tsne_speaker_embeddings.png',        DRIVE_OUT),
+]
+
+for src, dst_dir in to_backup:
+    if os.path.exists(src):
+        shutil.copy2(src, dst_dir)
+        print(f'  Backed up: {os.path.basename(src)} → {dst_dir}')
+    else:
+        print(f'  [WARN] not found: {src}')
+
+# ── Push to GitHub ────────────────────────────────────────────────────────────
+%cd /content/STREAMSENSE
+
+# Stage new training scripts and manifests (not the .pth — gitignored)
+!git add training/build_speaker_dataset.py \
+         training/dataset_speaker.py \
+         training/model_speaker.py \
+         training/train_speaker.py \
+         data/speaker_splits/ \
+         fingerprint_metadata.json \
+         SpeakerNet_Train.ipynb
+
+!git config user.email "streamsense-colab@osl"
+!git config user.name  "Colab-WA3"
+!git commit -m "WA-3: Add SpeakerNet training pipeline + speaker manifests + HNSW index metadata"
+!git push origin main
+
+print('\nAll done. WA-3 artifacts pushed to GitHub and backed up to Drive. ✓')
 
 ```
 
