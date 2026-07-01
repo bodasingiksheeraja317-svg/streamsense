@@ -76,18 +76,34 @@ def load_wav_float32(path: str) -> np.ndarray:
     return data.astype(np.float32)
 
 
-def load_speaker_map(csv_path: Path) -> dict:
+def remap_to_local_raw(filepath: str, raw_dir: Path) -> str:
+    """
+    speaker_train.csv may have been built on a different machine/OS (e.g. a
+    Windows path like 'C:\\STREAMSENSE\\data\\raw\\down\\xxx.wav'), so the
+    stored path won't resolve on this machine (e.g. Colab). We only need the
+    last two path components -- <class>/<filename> -- and re-root them under
+    this run's actual data/raw/ directory.
+    """
+    parts = filepath.replace("\\", "/").split("/")
+    class_name, filename = parts[-2], parts[-1]
+    return str(raw_dir / class_name / filename)
+
+
+def load_speaker_map(csv_path: Path, raw_dir: Path) -> dict:
     """
     Returns { speaker_id (int) -> [filepath, ...] }, built from
-    speaker_train.csv. Only speakers with >=1 file are kept (the upstream
-    build_speaker_dataset.py already filtered out speakers with <2
-    utterances, so in practice every speaker here qualifies).
+    speaker_train.csv, with every path re-rooted to this machine's
+    data/raw/ directory (see remap_to_local_raw). Only speakers with >=1
+    file are kept (the upstream build_speaker_dataset.py already filtered
+    out speakers with <2 utterances, so in practice every speaker here
+    qualifies).
     """
     speaker_map = defaultdict(list)
     with open(csv_path, "r", newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            speaker_map[int(row["speaker_id"])].append(row["filepath"])
+            local_path = remap_to_local_raw(row["filepath"], raw_dir)
+            speaker_map[int(row["speaker_id"])].append(local_path)
     return {sid: files for sid, files in speaker_map.items() if len(files) >= 1}
 
 
@@ -126,6 +142,7 @@ def main() -> None:
     root = Path(args.root).resolve() if args.root else script_dir.parent
 
     speaker_train_csv = root / "data" / "speaker_splits" / "speaker_train.csv"
+    raw_dir = root / "data" / "raw"
     out_root = root / "data" / "source_count_splits"
     clips_root = out_root / "clips"
 
@@ -141,13 +158,22 @@ def main() -> None:
     print(f"[INFO] Clips per class   : {args.clips_per_class}")
     print()
 
-    speaker_map = load_speaker_map(speaker_train_csv)
+    speaker_map = load_speaker_map(speaker_train_csv, raw_dir)
     speaker_ids = list(speaker_map.keys())
     print(f"[INFO] Eligible train speakers: {len(speaker_ids)}")
     if len(speaker_ids) < max(N_VALUES):
         raise RuntimeError(
             f"Only {len(speaker_ids)} speakers available in speaker_train.csv, "
             f"need at least {max(N_VALUES)} distinct speakers for N=8 mixes."
+        )
+
+    # Fail fast with a clear message if paths still don't resolve, instead of
+    # dying partway through building 8000 clips.
+    sample_path = next(iter(speaker_map.values()))[0]
+    if not Path(sample_path).exists():
+        raise FileNotFoundError(
+            f"Remapped path does not exist: {sample_path}\n"
+            f"Check that {raw_dir} contains <class>/<file>.wav (i.e. data/raw/ was extracted)."
         )
 
     rng = random.Random(args.seed)
